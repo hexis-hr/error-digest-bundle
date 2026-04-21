@@ -1,0 +1,65 @@
+{
+    "name": "hexis/error-digest-bundle",
+    "description": "Symfony bundle that captures Monolog errors, deduplicates them by fingerprint, emails a daily digest of new/spiking/top issues to admins, and provides a triage UI.",
+    "type": "symfony-bundle",
+    "license": "MIT",
+    "keywords": [
+        "symfony",
+        "symfony-bundle",
+        "monolog",
+        "error-tracking",
+        "error-reporting",
+        "observability",
+        "logging",
+        "doctrine",
+        "digest"
+    ],
+    "homepage": "https://github.com/hexis-hr/error-digest-bundle",
+    "support": {
+        "issues": "https://github.com/hexis-hr/error-digest-bundle/issues",
+        "source": "https://github.com/hexis-hr/error-digest-bundle"
+    },
+    "authors": [
+        {
+            "name": "Sinisa Valentic",
+            "email": "sinisa@hexis.hr",
+            "homepage": "https://hexis.hr"
+        }
+    ],
+    "require": {
+        "php": ">=8.2",
+        "doctrine/dbal": "^3",
+        "doctrine/doctrine-bundle": "^2.18",
+        "doctrine/doctrine-migrations-bundle": "^3.7",
+        "doctrine/orm": "^3.5",
+        "monolog/monolog": "^3.0",
+        "symfony/console": "^7.3",
+        "symfony/dependency-injection": "^7.3",
+        "symfony/event-dispatcher": "^7.3",
+        "symfony/framework-bundle": "^7.3",
+        "symfony/http-kernel": "^7.3",
+        "symfony/monolog-bundle": "^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5 || ^12.0"
+    },
+    "suggest": {
+        "symfony/mailer": "Required for the default MailerDigestSender — emails the daily digest to admins.",
+        "symfony/notifier": "Enables the NotifierDigestSender — chat-channel summaries via Slack, Teams, Discord, etc.",
+        "symfony/messenger": "Dispatches SendDailyDigest via bus; route to an async transport to keep digest work off the request path.",
+        "symfony/ux-live-component": "Unlocks the optional live-tail component in the triage UI.",
+        "symfony/ux-turbo": "Smoother in-page status/assignee updates without full reloads."
+    },
+    "autoload": {
+        "psr-4": {
+            "Hexis\\ErrorDigestBundle\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Hexis\\ErrorDigestBundle\\Tests\\": "tests/"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

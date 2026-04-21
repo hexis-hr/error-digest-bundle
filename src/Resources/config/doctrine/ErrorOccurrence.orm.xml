@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <entity name="Hexis\ErrorDigestBundle\Entity\ErrorOccurrence" table="err_occurrence">
+
+        <id name="id" type="bigint">
+            <generator strategy="IDENTITY"/>
+        </id>
+
+        <many-to-one field="fingerprint" target-entity="Hexis\ErrorDigestBundle\Entity\ErrorFingerprint">
+            <join-column name="fingerprint_id" referenced-column-name="id" nullable="false" on-delete="CASCADE"/>
+        </many-to-one>
+
+        <field name="occurredAt" column="occurred_at" type="datetime_immutable"/>
+        <field name="context" column="context_json" type="json"/>
+        <field name="requestUri" column="request_uri" type="string" length="2048" nullable="true"/>
+        <field name="method" type="string" length="10" nullable="true"/>
+        <field name="userRef" column="user_ref" type="string" length="64" nullable="true"/>
+        <field name="tracePreview" column="trace_preview" type="text" nullable="true"/>
+
+        <indexes>
+            <index name="idx_fingerprint_occurred" columns="fingerprint_id,occurred_at"/>
+            <index name="idx_occurred_at" columns="occurred_at"/>
+        </indexes>
+
+    </entity>
+
+</doctrine-mapping>

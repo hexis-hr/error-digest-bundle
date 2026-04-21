@@ -1,0 +1,97 @@
+{% extends '@ErrorDigest/layout.html.twig' %}
+
+{% block title %}Errors · {{ total }}{% endblock %}
+
+{% block body %}
+    <div class="ed-header">
+        <h1>Errors <small>{{ total }} {{ filters.status }}</small></h1>
+    </div>
+
+    <form method="get" class="row g-2 mb-3">
+        <div class="col-auto">
+            <select name="status" class="form-select form-select-sm">
+                <option value="">(any status)</option>
+                {% for option in ['open', 'resolved', 'muted'] %}
+                    <option value="{{ option }}"{% if filters.status == option %} selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-auto">
+            <select name="level" class="form-select form-select-sm">
+                <option value="">(any level)</option>
+                {% for option in ['emergency', 'alert', 'critical', 'error', 'warning', 'notice', 'info', 'debug'] %}
+                    <option value="{{ option }}"{% if filters.level == option %} selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-auto">
+            <select name="channel" class="form-select form-select-sm">
+                <option value="">(any channel)</option>
+                {% for channel in channels %}
+                    <option value="{{ channel }}"{% if filters.channel == channel %} selected{% endif %}>{{ channel }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-auto flex-grow-1">
+            <input type="search" name="q" value="{{ filters.search }}" class="form-control form-control-sm" placeholder="Search message / class / fingerprint…">
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-sm btn-primary">Filter</button>
+            <a href="{{ path('error_digest_dashboard') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
+        </div>
+    </form>
+
+    {% if rows is empty %}
+        <div class="alert alert-info">No fingerprints match the current filters.</div>
+    {% else %}
+        <div class="table-responsive">
+            <table class="table table-hover table-sm ed-fp align-middle bg-white">
+                <thead>
+                    <tr>
+                        <th>Level</th>
+                        <th>Status</th>
+                        <th>Fingerprint</th>
+                        <th>Message</th>
+                        <th>Channel</th>
+                        <th class="text-end">Count</th>
+                        <th>Last seen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                        <tr>
+                            <td><span class="badge badge-level badge-level-{{ row.levelName }}">{{ row.levelName }}</span></td>
+                            <td><span class="badge badge-status-{{ row.status }}">{{ row.status }}</span></td>
+                            <td class="fp-code">
+                                <a href="{{ path('error_digest_fingerprint_show', {id: row.id}) }}" class="text-decoration-none">{{ row.shortFingerprint() }}</a>
+                            </td>
+                            <td>
+                                {{ row.message|slice(0, 140) }}{% if row.message|length > 140 %}…{% endif %}
+                                {% if row.exceptionClass %}<br><small class="text-muted">{{ row.exceptionClass }}</small>{% endif %}
+                            </td>
+                            <td><small>{{ row.channel }}</small></td>
+                            <td class="text-end">{{ row.occurrenceCount }}</td>
+                            <td><small>{{ row.lastSeenAt|date('Y-m-d H:i') }}</small></td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% set total_pages = (total / page_size)|round(0, 'ceil') %}
+        {% if total_pages > 1 %}
+            <nav class="mt-3">
+                <ul class="pagination pagination-sm">
+                    {% set current_query = filters|filter(v => v) %}
+                    {% if page > 1 %}
+                        <li class="page-item"><a class="page-link" href="{{ path('error_digest_dashboard', current_query|merge({page: page - 1})) }}">Previous</a></li>
+                    {% endif %}
+                    <li class="page-item active"><span class="page-link">Page {{ page }} of {{ total_pages }}</span></li>
+                    {% if page < total_pages %}
+                        <li class="page-item"><a class="page-link" href="{{ path('error_digest_dashboard', current_query|merge({page: page + 1})) }}">Next</a></li>
+                    {% endif %}
+                </ul>
+            </nav>
+        {% endif %}
+    {% endif %}
+{% endblock %}

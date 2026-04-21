@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping xmlns="http://doctrine-project.org/schemas/orm/doctrine-mapping"
+                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                  xsi:schemaLocation="http://doctrine-project.org/schemas/orm/doctrine-mapping https://www.doctrine-project.org/schemas/orm/doctrine-mapping.xsd">
+
+    <entity name="Hexis\ErrorDigestBundle\Entity\ErrorFingerprint" table="err_fingerprint">
+
+        <id name="id" type="bigint">
+            <generator strategy="IDENTITY"/>
+        </id>
+
+        <field name="fingerprint" type="string" length="64" unique="true"/>
+        <field name="level" type="smallint"/>
+        <field name="levelName" column="level_name" type="string" length="16"/>
+        <field name="message" type="text"/>
+        <field name="exceptionClass" column="exception_class" type="string" length="255" nullable="true"/>
+        <field name="file" type="string" length="512" nullable="true"/>
+        <field name="line" type="integer" nullable="true"/>
+        <field name="channel" type="string" length="64"/>
+        <field name="environment" type="string" length="32"/>
+        <field name="firstSeenAt" column="first_seen_at" type="datetime_immutable"/>
+        <field name="lastSeenAt" column="last_seen_at" type="datetime_immutable"/>
+        <field name="occurrenceCount" column="occurrence_count" type="bigint"/>
+        <field name="status" type="string" length="16"/>
+        <field name="resolvedAt" column="resolved_at" type="datetime_immutable" nullable="true"/>
+        <field name="assigneeId" column="assignee_id" type="string" length="64" nullable="true"/>
+        <field name="notifiedInDigestAt" column="notified_in_digest_at" type="datetime_immutable" nullable="true"/>
+
+        <indexes>
+            <index name="idx_status_last_seen" columns="status,last_seen_at"/>
+            <index name="idx_level_last_seen" columns="level,last_seen_at"/>
+            <index name="idx_channel" columns="channel"/>
+        </indexes>
+
+    </entity>
+
+</doctrine-mapping>

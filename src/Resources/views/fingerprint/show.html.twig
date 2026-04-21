@@ -1,0 +1,95 @@
+{% extends '@ErrorDigest/layout.html.twig' %}
+
+{% block title %}{{ fp.shortFingerprint() }} — {{ fp.message|slice(0, 40) }}{% endblock %}
+
+{% block body %}
+    <p class="mb-2"><a href="{{ path('error_digest_dashboard') }}" class="text-decoration-none">← All errors</a></p>
+
+    <div class="ed-header">
+        <h1>
+            <span class="badge badge-level badge-level-{{ fp.levelName }}">{{ fp.levelName }}</span>
+            {{ fp.exceptionClass ?: 'log record' }}
+            <small class="fp-code">{{ fp.shortFingerprint() }}</small>
+        </h1>
+        <span class="badge badge-status-{{ fp.status }}">{{ fp.status }}</span>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-body">
+                    <pre class="mb-2" style="white-space: pre-wrap;">{{ fp.message }}</pre>
+                    {% if fp.file %}<small class="text-muted fp-code">{{ fp.file }}:{{ fp.line }}</small>{% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-body">
+                    <dl class="row mb-0 small">
+                        <dt class="col-5">Channel</dt><dd class="col-7">{{ fp.channel }}</dd>
+                        <dt class="col-5">Environment</dt><dd class="col-7">{{ fp.environment }}</dd>
+                        <dt class="col-5">Occurrences</dt><dd class="col-7">{{ fp.occurrenceCount }}</dd>
+                        <dt class="col-5">First seen</dt><dd class="col-7">{{ fp.firstSeenAt|date('Y-m-d H:i') }}</dd>
+                        <dt class="col-5">Last seen</dt><dd class="col-7">{{ fp.lastSeenAt|date('Y-m-d H:i') }}</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-6">
+            <form method="post" action="{{ path('error_digest_fingerprint_status', {id: fp.id}) }}" class="d-flex gap-2 align-items-center">
+                <input type="hidden" name="_token" value="{{ csrf_token('error_digest_status_' ~ fp.id) }}">
+                <label class="small mb-0">Status:</label>
+                <select name="status" class="form-select form-select-sm" style="max-width: 160px;">
+                    <option value="open"{% if fp.status == 'open' %} selected{% endif %}>Open</option>
+                    <option value="resolved"{% if fp.status == 'resolved' %} selected{% endif %}>Resolved</option>
+                    <option value="muted"{% if fp.status == 'muted' %} selected{% endif %}>Muted</option>
+                </select>
+                <button type="submit" class="btn btn-sm btn-primary">Update</button>
+            </form>
+        </div>
+        <div class="col-md-6">
+            <form method="post" action="{{ path('error_digest_fingerprint_assign', {id: fp.id}) }}" class="d-flex gap-2 align-items-center">
+                <input type="hidden" name="_token" value="{{ csrf_token('error_digest_assign_' ~ fp.id) }}">
+                <label class="small mb-0">Assignee:</label>
+                <input type="text" name="assignee" value="{{ fp.assigneeId|default('') }}" class="form-control form-control-sm" placeholder="user ref or email">
+                <button type="submit" class="btn btn-sm btn-secondary">Assign</button>
+            </form>
+        </div>
+    </div>
+
+    <h2 class="h6 text-uppercase text-muted mt-4">Recent occurrences ({{ occurrences|length }})</h2>
+
+    {% if occurrences is empty %}
+        <div class="alert alert-info">No recent occurrences stored. Older events may have been pruned.</div>
+    {% else %}
+        {% for occ in occurrences %}
+            <div class="card mb-2">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <strong class="small">{{ occ.occurred_at|date('Y-m-d H:i:s') }}</strong>
+                        <small class="text-muted">
+                            {% if occ.method %}{{ occ.method }} {% endif %}{{ occ.request_uri }}
+                            {% if occ.user_ref %}· user: {{ occ.user_ref }}{% endif %}
+                        </small>
+                    </div>
+                    {% if occ.trace_preview %}
+                        <details>
+                            <summary class="small">Stack trace</summary>
+                            <div class="stack mt-2">{{ occ.trace_preview }}</div>
+                        </details>
+                    {% endif %}
+                    {% if occ.context is not empty %}
+                        <details>
+                            <summary class="small">Context</summary>
+                            <div class="ctx mt-2">{{ occ.context|json_encode(constant('JSON_PRETTY_PRINT') b-or constant('JSON_UNESCAPED_SLASHES')) }}</div>
+                        </details>
+                    {% endif %}
+                </div>
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endblock %}
