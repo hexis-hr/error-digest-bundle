@@ -208,11 +208,18 @@ final class ErrorDigestBundle extends AbstractBundle
         }
 
         if ($builder->hasExtension('twig')) {
-            $container->extension('twig', [
-                'paths' => [
-                    $bundlePath . '/src/Resources/views' => 'ErrorDigest',
-                ],
-            ]);
+            $paths = [];
+
+            // Host override path registered FIRST so it wins the Twig lookup.
+            // Only add if the dir exists — Twig's FilesystemLoader throws on missing paths.
+            $overrideDir = $builder->getParameter('kernel.project_dir') . '/templates/bundles/ErrorDigestBundle';
+            if (is_dir($overrideDir)) {
+                $paths[$overrideDir] = 'ErrorDigest';
+            }
+
+            $paths[$bundlePath . '/src/Resources/views'] = 'ErrorDigest';
+
+            $container->extension('twig', ['paths' => $paths]);
         }
     }
 
