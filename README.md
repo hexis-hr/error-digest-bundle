@@ -245,15 +245,25 @@ The digest handler never runs in the request path by itself — it's only dispat
 
 ## Multi-tenant / separate-connection setups
 
-If your default connection is tenant-scoped (e.g., via a DBAL wrapper that filters by tenant id), you probably want errors to flow into a single cross-tenant connection. Configure:
+If your default connection is tenant-scoped (e.g., via a DBAL wrapper that filters by tenant id), you probably want errors to flow into a single cross-tenant connection. Two settings control the routing:
 
 ```yaml
 error_digest:
     storage:
-        connection: superadmin   # or whichever connection name is global
+        connection: superadmin       # DBAL writes go through this connection
+        entity_manager: superadmin   # Doctrine mapping attaches to this EM
 ```
 
-All capture writes go through that connection. The Doctrine mapping for the bundle's two entities attaches to the default EntityManager by convention; if this matters for you, you can mount the mapping explicitly in `doctrine.yaml` under the EM you prefer.
+- **`connection`** — which DBAL connection the handler and digest builder use for reads/writes. Defaults to `default`.
+- **`entity_manager`** (since v0.1.1) — which EntityManager gets the `ErrorDigest` mapping. Defaults to `null` which lands on the default EM. Set this to the EM that owns your non-default connection so `doctrine:schema:update --em=<name>` and `doctrine:migrations:migrate --em=<name>` operate on the right schema.
+
+For a typical `default` (tenant) + `superadmin` (global) two-EM setup, point both settings at `superadmin`. Then run the bundle's migration against that EM once:
+
+```bash
+php bin/console doctrine:migrations:migrate --em=superadmin --no-interaction
+```
+
+Add the same invocation to your deploy pipeline alongside your regular `doctrine:migrations:migrate` (which runs on the default EM).
 
 ---
 

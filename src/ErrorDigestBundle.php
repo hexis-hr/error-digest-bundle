@@ -61,6 +61,10 @@ final class ErrorDigestBundle extends AbstractBundle
                     ->addDefaultsIfNotSet()
                     ->children()
                         ->scalarNode('connection')->defaultValue('default')->end()
+                        ->scalarNode('entity_manager')
+                            ->info('EntityManager name to attach the ErrorDigest Doctrine mapping to. null = default EM. Match this to the EM that owns the same connection if you run schema:update / migrations per-EM.')
+                            ->defaultNull()
+                        ->end()
                         ->scalarNode('table_prefix')->defaultValue('err_')->end()
                         ->integerNode('occurrence_retention_days')->defaultValue(30)->min(1)->end()
                     ->end()
@@ -129,6 +133,7 @@ final class ErrorDigestBundle extends AbstractBundle
         $builder->setParameter('error_digest.dedup.fingerprinter', $config['dedup']['fingerprinter']);
         $builder->setParameter('error_digest.scrubber', $config['scrubber']);
         $builder->setParameter('error_digest.storage.connection', (string) $config['storage']['connection']);
+        $builder->setParameter('error_digest.storage.entity_manager', $config['storage']['entity_manager']);
         $builder->setParameter('error_digest.storage.table_prefix', (string) $config['storage']['table_prefix']);
         $builder->setParameter('error_digest.storage.occurrence_retention_days', (int) $config['storage']['occurrence_retention_days']);
         $builder->setParameter('error_digest.digest', $config['digest']);
@@ -163,21 +168,24 @@ final class ErrorDigestBundle extends AbstractBundle
     public function prependExtension(ContainerConfigurator $container, ContainerBuilder $builder): void
     {
         $bundlePath = \dirname(__DIR__);
+        $entityManager = $this->resolveConfiguredEntityManager($builder);
 
         if ($builder->hasExtension('doctrine')) {
-            $container->extension('doctrine', [
-                'orm' => [
-                    'mappings' => [
-                        'ErrorDigest' => [
-                            'type' => 'xml',
-                            'dir' => $bundlePath . '/src/Resources/config/doctrine',
-                            'prefix' => 'Hexis\\ErrorDigestBundle\\Entity',
-                            'alias' => 'ErrorDigest',
-                            'is_bundle' => false,
-                        ],
-                    ],
+            $mapping = [
+                'ErrorDigest' => [
+                    'type' => 'xml',
+                    'dir' => $bundlePath . '/src/Resources/config/doctrine',
+                    'prefix' => 'Hexis\\ErrorDigestBundle\\Entity',
+                    'alias' => 'ErrorDigest',
+                    'is_bundle' => false,
                 ],
-            ]);
+            ];
+
+            $ormConfig = $entityManager === null
+                ? ['mappings' => $mapping]
+                : ['entity_managers' => [$entityManager => ['mappings' => $mapping]]];
+
+            $container->extension('doctrine', ['orm' => $ormConfig]);
         }
 
         if ($builder->hasExtension('doctrine_migrations')) {
@@ -206,5 +214,24 @@ final class ErrorDigestBundle extends AbstractBundle
                 ],
             ]);
         }
+    }
+
+    /**
+     * Read the host's raw `error_digest.storage.entity_manager` config, if any.
+     * prependExtension runs before loadExtension, so the bundle's config tree
+     * isn't processed yet — scan the raw configs and take the last-wins value.
+     */
+    private function resolveConfiguredEntityManager(ContainerBuilder $builder): ?string
+    {
+        foreach (array_reverse($builder->getExtensionConfig('error_digest')) as $config) {
+            if (isset($config['storage']['entity_manager'])
+                && $config['storage']['entity_manager'] !== null
+                && $config['storage']['entity_manager'] !== ''
+            ) {
+                return (string) $config['storage']['entity_manager'];
+            }
+        }
+
+        return null;
     }
 }
