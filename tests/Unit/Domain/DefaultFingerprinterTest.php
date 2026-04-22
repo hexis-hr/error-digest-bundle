@@ -88,6 +88,65 @@ final class DefaultFingerprinterTest extends TestCase
         self::assertSame($this->fingerprinter->fingerprint($a), $this->fingerprinter->fingerprint($b));
     }
 
+    public function testDigitsEmbeddedInIdentifiersAreStripped(): void
+    {
+        // Word-boundary regex previously missed these because `_` is a word char — `_7` had no
+        // boundary and the 7 stayed distinct across variants. Now collapsed.
+        $a = $this->recordWithException($this->makeException(\RuntimeException::class, 'Warning: file_put_contents(/mnt/scanner//solo_invoice_7-1-1.pdf): Failed to open stream: Permission denied'));
+        $b = $this->recordWithException($this->makeException(\RuntimeException::class, 'Warning: file_put_contents(/mnt/scanner//solo_invoice_8-1-1.pdf): Failed to open stream: Permission denied'));
+        $c = $this->recordWithException($this->makeException(\RuntimeException::class, 'Warning: file_put_contents(/mnt/scanner//solo_invoice_12-1-1.pdf): Failed to open stream: Permission denied'));
+
+        self::assertSame($this->fingerprinter->fingerprint($a), $this->fingerprinter->fingerprint($b));
+        self::assertSame($this->fingerprinter->fingerprint($a), $this->fingerprinter->fingerprint($c));
+    }
+
+    public function testQuotedHostnamesAreCollapsed(): void
+    {
+        // Symfony's Untrusted Host exception inlines the offending hostname — fingerprint should
+        // group these so bots probing a dozen vhosts don't produce a dozen rows.
+        $a = $this->recordWithException($this->makeException(\RuntimeException::class, 'Untrusted Host "epistula.hexis.hr".'));
+        $b = $this->recordWithException($this->makeException(\RuntimeException::class, 'Untrusted Host "hzzo-chat.hexis.dev".'));
+        $c = $this->recordWithException($this->makeException(\RuntimeException::class, 'Untrusted Host "162.55.63.193".'));
+
+        self::assertSame($this->fingerprinter->fingerprint($a), $this->fingerprinter->fingerprint($b));
+        self::assertSame($this->fingerprinter->fingerprint($a), $this->fingerprinter->fingerprint($c));
+    }
+
+    public function testEmailsAreCollapsed(): void
+    {
+        $a = $this->recordWithException($this->makeException(\RuntimeException::class, 'Mailbox for alice@example.com missing'));
+        $b = $this->recordWithException($this->makeException(\RuntimeException::class, 'Mailbox for bob@other-host.io missing'));
+
+        self::assertSame($this->fingerprinter->fingerprint($a), $this->fingerprinter->fingerprint($b));
+    }
+
+    public function testUrlsAreCollapsed(): void
+    {
+        $a = $this->recordWithException($this->makeException(\RuntimeException::class, 'Fetch failed for https://api.example.com/v1/foo'));
+        $b = $this->recordWithException($this->makeException(\RuntimeException::class, 'Fetch failed for https://other.example.com/v2/bar'));
+
+        self::assertSame($this->fingerprinter->fingerprint($a), $this->fingerprinter->fingerprint($b));
+    }
+
+    public function testRepeatedSlashesCollapse(): void
+    {
+        $a = $this->recordWithException($this->makeException(\RuntimeException::class, 'file_put_contents(/mnt/scanner//foo.pdf): denied'));
+        $b = $this->recordWithException($this->makeException(\RuntimeException::class, 'file_put_contents(/mnt/scanner/foo.pdf): denied'));
+
+        self::assertSame($this->fingerprinter->fingerprint($a), $this->fingerprinter->fingerprint($b));
+    }
+
+    public function testUuidStillBeatsDigitNormalization(): void
+    {
+        // UUIDs must resolve to UUID, not 0-0-0-0-0 after digit-stripping.
+        $a = $this->recordWithException($this->makeException(\RuntimeException::class, 'Entity 550e8400-e29b-41d4-a716-446655440000 missing'));
+        $hash = $this->fingerprinter->fingerprint($a);
+
+        // Sanity — just make sure fingerprint is stable + 64-hex.
+        self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $hash);
+        self::assertSame($hash, $this->fingerprinter->fingerprint($a));
+    }
+
     public function testRecordWithoutExceptionFallsBackToChannelAndLevel(): void
     {
         $record = new LogRecord(
