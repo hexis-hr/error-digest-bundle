@@ -11,12 +11,17 @@ use Hexis\ErrorDigestBundle\Doctrine\TablePrefixListener;
 use Hexis\ErrorDigestBundle\Domain\DefaultFingerprinter;
 use Hexis\ErrorDigestBundle\Domain\DefaultPiiScrubber;
 use Hexis\ErrorDigestBundle\Domain\Fingerprinter;
+use Hexis\ErrorDigestBundle\Controller\Ingest\JsController;
 use Hexis\ErrorDigestBundle\Domain\PiiScrubber;
+use Hexis\ErrorDigestBundle\Js\JsIngester;
+use Hexis\ErrorDigestBundle\Js\JsPayloadValidator;
+use Hexis\ErrorDigestBundle\Js\JsRateLimiter;
 use Hexis\ErrorDigestBundle\MessageHandler\SendDailyDigestHandler;
 use Hexis\ErrorDigestBundle\Monolog\ErrorDigestHandler;
 use Hexis\ErrorDigestBundle\Storage\DbalWriter;
 use Hexis\ErrorDigestBundle\Storage\FingerprintReader;
 use Hexis\ErrorDigestBundle\Storage\Writer;
+use Hexis\ErrorDigestBundle\Twig\ErrorDigestExtension;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 
 use function Symfony\Component\DependencyInjection\Loader\Configurator\param;
@@ -92,4 +97,31 @@ return static function (ContainerConfigurator $container): void {
     $services->set(SendDailyDigestHandler::class)
         ->arg('$senders', tagged_iterator('error_digest.sender'))
         ->arg('$enabledSenderNames', param('error_digest.digest.senders'));
+
+    // ----- JS ingest -----
+
+    $services->set(JsPayloadValidator::class)
+        ->arg('$maxStackLines', param('error_digest.js.max_stack_lines'));
+
+    $services->set(JsRateLimiter::class)
+        ->arg('$cache', service('cache.app'))
+        ->arg('$maxRequestsPerMinute', param('error_digest.js.rate_limit_per_minute'));
+
+    $services->set(JsIngester::class)
+        ->arg('$connection', service('error_digest.connection'))
+        ->arg('$scrubber', service(PiiScrubber::class))
+        ->arg('$fingerprintTable', param('error_digest.table.fingerprint'))
+        ->arg('$occurrenceTable', param('error_digest.table.occurrence'));
+
+    $services->set(JsController::class)
+        ->tag('controller.service_arguments')
+        ->arg('$kernelEnvironment', param('kernel.environment'))
+        ->arg('$allowedOrigins', param('error_digest.js.allowed_origins'))
+        ->arg('$maxPayloadBytes', param('error_digest.js.max_payload_bytes'));
+
+    $services->set(ErrorDigestExtension::class)
+        ->arg('$enabled', param('error_digest.js.enabled'))
+        ->arg('$release', param('error_digest.js.release'))
+        ->arg('$maxPerPage', param('error_digest.js.client_max_per_page'))
+        ->arg('$dedupWindowMs', param('error_digest.js.client_dedup_window_ms'));
 };

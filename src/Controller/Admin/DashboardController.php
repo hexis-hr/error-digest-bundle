@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Hexis\ErrorDigestBundle\Controller;
+namespace Hexis\ErrorDigestBundle\Controller\Admin;
 
 use Hexis\ErrorDigestBundle\Storage\FingerprintReader;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;

@@ -74,15 +74,30 @@ doctrine_migrations:
 
 *(path-repo installs symlink, so that path resolves via the vendor symlink)*
 
-### 4. Configure routing (for the UI)
+### 4. Configure routing
+
+The bundle ships two route groups — the admin UI and the JS ingest endpoint — under separate controller subdirectories so you can host-constrain or auth-gate them independently:
 
 ```yaml
 # config/routes/error_digest.yaml
-error_digest:
-    resource: '@ErrorDigestBundle/src/Controller/'
+error_digest_admin:
+    resource: '@ErrorDigestBundle/src/Controller/Admin/'
     type: attribute
     prefix: /_errors
+    # Optional: restrict to a host, e.g. for a superadmin subdomain
+    # host: 'superadmin.{_domain}'
+    # defaults: { _domain: '%app.base_domain%' }
+    # requirements: { _domain: '.+' }
+
+error_digest_ingest:
+    resource: '@ErrorDigestBundle/src/Controller/Ingest/'
+    type: attribute
+    prefix: /_errors/ingest
+    # Public POST endpoint for browser error reports — leave host-unconstrained
+    # so any subdomain in your app can send to it.
 ```
+
+> **Upgrading from v0.1.x?** The admin controllers moved from `Controller/` to `Controller/Admin/`. Update your `resource:` path accordingly. Route names (`error_digest_dashboard`, etc.) are unchanged.
 
 ### 5. Configure the bundle
 
@@ -119,6 +134,15 @@ error_digest:
         role: ROLE_ADMIN
     rate_limit:
         per_fingerprint_seconds: 1      # within this window, one occurrence row per fingerprint
+    js:
+        enabled: true
+        allowed_origins: ['https://%env(APP_DOMAIN)%', 'https://*.%env(APP_DOMAIN)%']
+        max_payload_bytes: 16384
+        max_stack_lines: 50
+        rate_limit_per_minute: 30       # per-IP cap
+        client_max_per_page: 50         # browser-side cap per page-load
+        client_dedup_window_ms: 5000    # browser-side dedup
+        release: '%env(default::APP_RELEASE)%'  # optional, included in fingerprint context
 ```
 
 ### 6. Run migrations
@@ -240,6 +264,70 @@ framework:
 ```
 
 The digest handler never runs in the request path by itself — it's only dispatched by the console command or your scheduler.
+
+---
+
+## Browser error capture (since v0.2.0)
+
+JS errors that fire in users' browsers go undetected by default — Monolog only sees server-side. The bundle ships a vanilla-JS client + ingest endpoint so browser errors land in the same `err_fingerprint` table, channel = `js`, alongside server-side captures.
+
+### Wire it in
+
+The ingest controller registers a public POST route under `Controller/Ingest/`. Once your routing splits `Admin/` from `Ingest/` (see install step 4), the endpoint is live at the prefix you configured.
+
+Then publish the JS file:
+
+```bash
+bin/console assets:install
+```
+
+This copies `error-digest.js` to `public/bundles/errordigest/error-digest.js`. Include it in your base layout via the Twig helper:
+
+```twig
+<!-- in base.html.twig, before </body> -->
+{{ error_digest_script() }}
+
+<!-- with optional release + user id baked in -->
+{{ error_digest_script({release: app_version, user: app.user.id}) }}
+```
+
+The helper emits a `<script defer>` tag pointing at the bundled JS file with `data-endpoint` set to the ingest route URL (so URL generation handles your subdomain config automatically).
+
+### What gets captured
+
+- `window.error` events — synchronous JS errors + resource load failures
+- `unhandledrejection` events — async / Promise rejections
+- Anything you forward manually via `window.errorDigest.capture(error, {extra})`
+
+Each report carries: message, exception type, source URL, line, column, stack trace, page URL, user agent, optional release + user.
+
+### Safety properties
+
+- **Client-side dedup** — same fingerprint within `client_dedup_window_ms` is sent once
+- **Page-load cap** — at most `client_max_per_page` reports per page (kills runaway loops)
+- **Server-side per-IP rate limit** — `rate_limit_per_minute` cap, configurable, 0 disables
+- **Origin allowlist** — `allowed_origins` controls which sites' browsers can POST. Supports wildcards (`https://*.example.com`).
+- **Payload caps** — request body capped at `max_payload_bytes`, stack trimmed to `max_stack_lines`
+- **Always 204** — endpoint never leaks validation/policy info to clients
+- **`navigator.sendBeacon`** — flushes on `pagehide` so errors right before navigation aren't lost
+
+### Manual API
+
+```html
+<script>
+    try {
+        riskyOperation();
+    } catch (e) {
+        window.errorDigest.capture(e, {source: 'checkout-form'});
+    }
+</script>
+```
+
+### What's deliberately NOT captured
+
+- `console.error` calls — too noisy (third-party scripts, devtools warnings)
+- Network errors / failed fetches — separate concern; use the manual API if you need it
+- Source-map resolution — line/col stays as minified positions; resolve from devtools
 
 ---
 

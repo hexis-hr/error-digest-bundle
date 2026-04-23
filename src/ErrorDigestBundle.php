@@ -118,6 +118,36 @@ final class ErrorDigestBundle extends AbstractBundle
                         ->end()
                     ->end()
                 ->end()
+                ->arrayNode('js')
+                    ->addDefaultsIfNotSet()
+                    ->info('Browser error capture (window.error + unhandledrejection → ingest endpoint).')
+                    ->children()
+                        ->booleanNode('enabled')->defaultTrue()->end()
+                        ->arrayNode('allowed_origins')
+                            ->info('Origins permitted to POST JS reports. Supports wildcards, e.g. https://*.example.com. "*" allows any origin.')
+                            ->scalarPrototype()->end()
+                            ->defaultValue([])
+                        ->end()
+                        ->integerNode('max_payload_bytes')->defaultValue(16384)->min(1024)->end()
+                        ->integerNode('max_stack_lines')->defaultValue(50)->min(5)->end()
+                        ->integerNode('rate_limit_per_minute')
+                            ->info('Per-IP cap on ingest requests. 0 disables.')
+                            ->defaultValue(30)->min(0)
+                        ->end()
+                        ->integerNode('client_max_per_page')
+                            ->info('Browser-side cap on reports from a single page load.')
+                            ->defaultValue(50)->min(1)
+                        ->end()
+                        ->integerNode('client_dedup_window_ms')
+                            ->info('Browser-side dedup window for identical fingerprints.')
+                            ->defaultValue(5000)->min(0)
+                        ->end()
+                        ->scalarNode('release')
+                            ->info('Release identifier bundled with each report (e.g. git sha or build version). Null to omit.')
+                            ->defaultNull()
+                        ->end()
+                    ->end()
+                ->end()
             ->end();
     }
 
@@ -154,6 +184,14 @@ final class ErrorDigestBundle extends AbstractBundle
         $builder->setParameter('error_digest.ui.role', (string) $config['ui']['role']);
         $builder->setParameter('error_digest.async.transport', $config['async']['transport']);
         $builder->setParameter('error_digest.rate_limit.per_fingerprint_seconds', (int) $config['rate_limit']['per_fingerprint_seconds']);
+        $builder->setParameter('error_digest.js.enabled', (bool) $config['js']['enabled']);
+        $builder->setParameter('error_digest.js.allowed_origins', (array) $config['js']['allowed_origins']);
+        $builder->setParameter('error_digest.js.max_payload_bytes', (int) $config['js']['max_payload_bytes']);
+        $builder->setParameter('error_digest.js.max_stack_lines', (int) $config['js']['max_stack_lines']);
+        $builder->setParameter('error_digest.js.rate_limit_per_minute', (int) $config['js']['rate_limit_per_minute']);
+        $builder->setParameter('error_digest.js.client_max_per_page', (int) $config['js']['client_max_per_page']);
+        $builder->setParameter('error_digest.js.client_dedup_window_ms', (int) $config['js']['client_dedup_window_ms']);
+        $builder->setParameter('error_digest.js.release', $config['js']['release']);
 
         $tablePrefix = (string) $config['storage']['table_prefix'];
         $builder->setParameter('error_digest.table.fingerprint', $tablePrefix . 'fingerprint');
