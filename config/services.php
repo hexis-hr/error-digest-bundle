@@ -26,6 +26,7 @@ use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigura
 
 use function Symfony\Component\DependencyInjection\Loader\Configurator\param;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\service;
+use function Symfony\Component\DependencyInjection\Loader\Configurator\service_closure;
 use function Symfony\Component\DependencyInjection\Loader\Configurator\tagged_iterator;
 
 return static function (ContainerConfigurator $container): void {
@@ -55,7 +56,7 @@ return static function (ContainerConfigurator $container): void {
         ->arg('$tablePrefix', param('error_digest.storage.table_prefix'));
 
     $services->set(DbalWriter::class)
-        ->arg('$connection', service('error_digest.connection'))
+        ->arg('$connectionFactory', service_closure('error_digest.connection'))
         ->arg('$scrubber', service(PiiScrubber::class))
         ->arg('$fingerprintTable', param('error_digest.table.fingerprint'))
         ->arg('$occurrenceTable', param('error_digest.table.occurrence'));

@@ -22,7 +22,7 @@ final class DbalWriterTest extends TestCase
     {
         $this->connection = SchemaFactory::create();
         $this->writer = new DbalWriter(
-            connection: $this->connection,
+            connectionFactory: fn () => $this->connection,
             scrubber: new DefaultPiiScrubber(),
             fingerprintTable: SchemaFactory::FINGERPRINT_TABLE,
             occurrenceTable: SchemaFactory::OCCURRENCE_TABLE,

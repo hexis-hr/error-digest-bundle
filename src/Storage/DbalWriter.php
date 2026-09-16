@@ -18,12 +18,22 @@ use Hexis\ErrorDigestBundle\Entity\ErrorFingerprint;
  */
 final class DbalWriter implements Writer
 {
+    private ?Connection $connection = null;
+
+    /**
+     * @param \Closure(): Connection $connectionFactory
+     */
     public function __construct(
-        private readonly Connection $connection,
+        private readonly \Closure $connectionFactory,
         private readonly PiiScrubber $scrubber,
         private readonly string $fingerprintTable,
         private readonly string $occurrenceTable,
     ) {
+    }
+
+    private function connection(): Connection
+    {
+        return $this->connection ??= ($this->connectionFactory)();
     }
 
     /**
@@ -35,7 +45,7 @@ final class DbalWriter implements Writer
             return;
         }
 
-        $this->connection->beginTransaction();
+        $this->connection()->beginTransaction();
         try {
             foreach ($buffer as $fingerprint => $buffered) {
                 $fingerprintId = $this->upsertFingerprint($fingerprint, $buffered, $environment);
@@ -43,9 +53,9 @@ final class DbalWriter implements Writer
                     $this->insertOccurrence($fingerprintId, $record);
                 }
             }
-            $this->connection->commit();
+            $this->connection()->commit();
         } catch (\Throwable $e) {
-            $this->connection->rollBack();
+            $this->connection()->rollBack();
             throw $e;
         }
     }
@@ -62,7 +72,7 @@ final class DbalWriter implements Writer
         $file = $exception instanceof \Throwable ? $exception->getFile() : null;
         $line = $exception instanceof \Throwable ? $exception->getLine() : null;
 
-        $platform = $this->connection->getDatabasePlatform();
+        $platform = $this->connection()->getDatabasePlatform();
         $firstSeenSql = $buffered->firstSeenAt->format('Y-m-d H:i:s');
         $lastSeenSql = $buffered->lastSeenAt->format('Y-m-d H:i:s');
 
@@ -92,7 +102,7 @@ final class DbalWriter implements Writer
             throw new \RuntimeException('Unsupported database platform: ' . $platform::class);
         }
 
-        $this->connection->executeStatement($sql, [
+        $this->connection()->executeStatement($sql, [
             $fingerprint,
             $level,
             $levelName,
@@ -122,7 +132,7 @@ final class DbalWriter implements Writer
             ParameterType::STRING,
         ]);
 
-        $id = $this->connection->fetchOne(
+        $id = $this->connection()->fetchOne(
             sprintf('SELECT id FROM %s WHERE fingerprint = ?', $this->fingerprintTable),
             [$fingerprint],
             [ParameterType::STRING],
@@ -155,7 +165,7 @@ final class DbalWriter implements Writer
         $requestUri = \is_string($record->extra['url'] ?? null) ? $record->extra['url'] : null;
         $method = \is_string($record->extra['http_method'] ?? null) ? $record->extra['http_method'] : null;
 
-        $this->connection->executeStatement(
+        $this->connection()->executeStatement(
             sprintf(
                 'INSERT INTO %s (fingerprint_id, occurred_at, context_json, request_uri, method, user_ref, trace_preview)
                  VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -209,7 +219,7 @@ final class DbalWriter implements Writer
 
     public function prune(\DateTimeImmutable $threshold): int
     {
-        return (int) $this->connection->executeStatement(
+        return (int) $this->connection()->executeStatement(
             sprintf('DELETE FROM %s WHERE occurred_at < ?', $this->occurrenceTable),
             [$threshold->format('Y-m-d H:i:s')],
             [ParameterType::STRING],
