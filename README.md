@@ -20,10 +20,10 @@ Built for when logs are a haystack and real errors go under the radar.
 
 ## Requirements
 
-- PHP 8.2+
-- Symfony 7.3
-- Doctrine ORM 3 / DBAL 3
-- Monolog 3 + `symfony/monolog-bundle`
+- PHP 8.2+ (8.4+ on Symfony 8)
+- Symfony 6.4, 7.x or 8.x
+- Doctrine ORM 2.14+ / 3, DBAL 3 / 4
+- Monolog 3 + `symfony/monolog-bundle` 3 or 4
 - Messenger + Mailer (host probably already has these)
 
 Optional:
