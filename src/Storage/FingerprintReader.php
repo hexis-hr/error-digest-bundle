@@ -23,7 +23,7 @@ final class FingerprintReader
     }
 
     /**
-     * @param array{status?: ?string, level?: ?string, channel?: ?string, search?: ?string} $filters
+     * @param array{status?: ?string, level?: ?string, channel?: ?string, since?: ?\DateTimeImmutable, search?: ?string} $filters
      * @return array{rows: list<FingerprintSummary>, total: int}
      */
     public function list(array $filters, int $limit, int $offset): array
@@ -142,7 +142,7 @@ final class FingerprintReader
     }
 
     /**
-     * @param array{status?: ?string, level?: ?string, channel?: ?string, search?: ?string} $filters
+     * @param array{status?: ?string, level?: ?string, channel?: ?string, since?: ?\DateTimeImmutable, search?: ?string} $filters
      * @return array{0: string, 1: list<mixed>, 2: list<int>}
      */
     private function buildWhere(array $filters): array
@@ -164,6 +164,11 @@ final class FingerprintReader
         if (!empty($filters['channel'])) {
             $clauses[] = 'f.channel = ?';
             $params[] = $filters['channel'];
+            $types[] = ParameterType::STRING;
+        }
+        if (!empty($filters['since'])) {
+            $clauses[] = 'f.last_seen_at >= ?';
+            $params[] = $filters['since']->format('Y-m-d H:i:s');
             $types[] = ParameterType::STRING;
         }
         if (!empty($filters['search'])) {

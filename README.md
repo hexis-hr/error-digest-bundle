@@ -170,6 +170,53 @@ The bundle does not schedule itself. You wire the trigger via OS cron, a Symfony
 | `error-digest:send-digest [--dry-run] [--as-of=Y-m-d H:i:s]` | Build the digest and dispatch to configured senders. |
 | `error-digest:fingerprint-test [--count=N] [--message=…] [--level=…] [--ignored]` | Emit a synthetic exception so you can verify the capture pipeline end-to-end. |
 | `error-digest:prune [--older-than=30d] [--dry-run]` | Delete occurrence rows older than the threshold. Fingerprint rows and lifetime counters are preserved. |
+| `error-digest:list [--status=open] [--since=7d] [--limit=50]` | Print fingerprints as JSON for triage (by developers, scripts or an AI agent). Read-only. |
+
+### Listing errors as JSON
+
+`error-digest:list` prints the fingerprints matching the filters, most recently seen first, to stdout as JSON (errors go to stderr, exit code 2 on an invalid option):
+
+- `--status`: `open` (default), `resolved`, `muted` or `all`
+- `--since`: only fingerprints last seen since `7d`, `12h`, `90m`, `Y-m-d` or `"Y-m-d H:i:s"`
+- `--limit`: maximum number of items (default 50); `total` still counts every match
+
+```bash
+bin/console error-digest:list --since=1d --limit=20 > open-errors.json
+```
+
+```json
+{
+    "generated_at": "2026-10-15T09:00:00+02:00",
+    "filters": { "status": "open", "since": "2026-10-14T09:00:00+02:00", "limit": 20 },
+    "total": 1,
+    "items": [
+        {
+            "id": 3,
+            "fingerprint": "d8412648e6c7b2d88468944bd582e88bdd9090f8efe6f8702ece99579bd75301",
+            "status": "open",
+            "level": "critical",
+            "channel": "request",
+            "environment": "prod",
+            "exception_class": "LogicException",
+            "message": "Partner 4711 could not be saved, Bearer [REDACTED] rejected",
+            "file": "/app/src/Partner/PartnerService.php",
+            "line": 63,
+            "occurrence_count": 2,
+            "first_seen_at": "2026-10-15T08:59:31+02:00",
+            "last_seen_at": "2026-10-15T08:59:32+02:00",
+            "latest_occurrence": {
+                "occurred_at": "2026-10-15T08:59:32+02:00",
+                "method": "POST",
+                "request_uri": "/partners/4711",
+                "release": null,
+                "trace_preview": "LogicException: Partner 4711 could not be saved, Bearer [REDACTED] rejected\n  at /app/src/Partner/PartnerService.php:63\n  #0 ..."
+            }
+        }
+    ]
+}
+```
+
+`latest_occurrence` is the most recent occurrence row (`null` once pruned); `release` is set for browser errors. No personal data is printed: `message`, `trace_preview` and `request_uri` pass through the configured `PiiScrubber`, query strings and fragments are cut from `request_uri`, and occurrence context and user references are left out.
 
 ---
 
