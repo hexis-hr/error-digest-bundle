@@ -62,11 +62,12 @@ final class JsIngester
                 $this->fingerprintTable,
             );
         } elseif ($platform instanceof PostgreSQLPlatform || $platform instanceof SqlitePlatform) {
+            // CASE rather than GREATEST(), which SQLite does not have.
             $sql = sprintf(
                 'INSERT INTO %s (fingerprint, level, level_name, message, exception_class, file, line, channel, environment, first_seen_at, last_seen_at, occurrence_count, status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (fingerprint) DO UPDATE SET
-                    last_seen_at = GREATEST(%1$s.last_seen_at, EXCLUDED.last_seen_at),
+                    last_seen_at = CASE WHEN EXCLUDED.last_seen_at > %1$s.last_seen_at THEN EXCLUDED.last_seen_at ELSE %1$s.last_seen_at END,
                     occurrence_count = %1$s.occurrence_count + 1',
                 $this->fingerprintTable,
             );
