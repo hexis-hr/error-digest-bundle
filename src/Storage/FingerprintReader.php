@@ -23,7 +23,7 @@ final class FingerprintReader
     }
 
     /**
-     * @param array{status?: ?string, level?: ?string, channel?: ?string, search?: ?string} $filters
+     * @param array{status?: ?string, level?: ?string, channel?: ?string, since?: ?\DateTimeImmutable, search?: ?string} $filters
      * @return array{rows: list<FingerprintSummary>, total: int}
      */
     public function list(array $filters, int $limit, int $offset): array
@@ -79,7 +79,7 @@ final class FingerprintReader
                 'SELECT id, occurred_at, context_json, request_uri, method, user_ref, trace_preview
                  FROM %s
                  WHERE fingerprint_id = ?
-                 ORDER BY occurred_at DESC
+                 ORDER BY occurred_at DESC, id DESC
                  LIMIT %d',
                 $this->occurrenceTable,
                 max(1, $limit),
@@ -88,18 +88,56 @@ final class FingerprintReader
             [ParameterType::INTEGER],
         );
 
-        return array_map(
-            static fn (array $row) => [
-                'id' => (int) $row['id'],
-                'occurred_at' => new \DateTimeImmutable((string) $row['occurred_at']),
-                'context' => json_decode((string) $row['context_json'], true) ?: [],
-                'request_uri' => $row['request_uri'] !== null ? (string) $row['request_uri'] : null,
-                'method' => $row['method'] !== null ? (string) $row['method'] : null,
-                'user_ref' => $row['user_ref'] !== null ? (string) $row['user_ref'] : null,
-                'trace_preview' => $row['trace_preview'] !== null ? (string) $row['trace_preview'] : null,
-            ],
-            $rows,
+        return array_map(self::hydrateOccurrence(...), $rows);
+    }
+
+    /**
+     * The latest occurrence of each fingerprint, in one query, keyed by fingerprint id. A
+     * fingerprint without occurrences (all pruned) has no key. A correlated subquery rather
+     * than ROW_NUMBER() keeps MySQL 5.7 (supported by DBAL 3) working; its ORDER BY starts
+     * with the fixed fingerprint_id so MySQL reads idx_err_fingerprint_occurred backwards
+     * instead of sorting every occurrence of the fingerprint.
+     *
+     * @param list<int> $fingerprintIds
+     * @return array<int, array{
+     *   id: int, occurred_at: \DateTimeImmutable, context: array<string, mixed>,
+     *   request_uri: ?string, method: ?string, user_ref: ?string, trace_preview: ?string
+     * }>
+     */
+    public function latestOccurrences(array $fingerprintIds): array
+    {
+        if ($fingerprintIds === []) {
+            return [];
+        }
+
+        $rows = $this->connection->fetchAllAssociative(
+            sprintf(
+                'SELECT o.fingerprint_id, o.id, o.occurred_at, o.context_json, o.request_uri, o.method, o.user_ref, o.trace_preview
+                 FROM %1$s o
+                 INNER JOIN (
+                     SELECT (
+                         SELECT l.id FROM %1$s l
+                         WHERE l.fingerprint_id = f.id
+                         ORDER BY l.fingerprint_id DESC, l.occurred_at DESC, l.id DESC
+                         LIMIT 1
+                     ) AS id
+                     FROM %2$s f
+                     WHERE f.id IN (%3$s)
+                 ) latest ON latest.id = o.id',
+                $this->occurrenceTable,
+                $this->fingerprintTable,
+                implode(',', array_fill(0, \count($fingerprintIds), '?')),
+            ),
+            array_values($fingerprintIds),
+            array_fill(0, \count($fingerprintIds), ParameterType::INTEGER),
         );
+
+        $latest = [];
+        foreach ($rows as $row) {
+            $latest[(int) $row['fingerprint_id']] = self::hydrateOccurrence($row);
+        }
+
+        return $latest;
     }
 
     public function updateStatus(int $id, string $status): void
@@ -142,7 +180,7 @@ final class FingerprintReader
     }
 
     /**
-     * @param array{status?: ?string, level?: ?string, channel?: ?string, search?: ?string} $filters
+     * @param array{status?: ?string, level?: ?string, channel?: ?string, since?: ?\DateTimeImmutable, search?: ?string} $filters
      * @return array{0: string, 1: list<mixed>, 2: list<int>}
      */
     private function buildWhere(array $filters): array
@@ -166,6 +204,11 @@ final class FingerprintReader
             $params[] = $filters['channel'];
             $types[] = ParameterType::STRING;
         }
+        if (!empty($filters['since'])) {
+            $clauses[] = 'f.last_seen_at >= ?';
+            $params[] = $filters['since']->format('Y-m-d H:i:s');
+            $types[] = ParameterType::STRING;
+        }
         if (!empty($filters['search'])) {
             $clauses[] = '(f.message LIKE ? OR f.exception_class LIKE ? OR f.fingerprint LIKE ?)';
             $like = '%' . $filters['search'] . '%';
@@ -178,6 +221,26 @@ final class FingerprintReader
         }
 
         return [implode(' AND ', $clauses), $params, $types];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array{
+     *   id: int, occurred_at: \DateTimeImmutable, context: array<string, mixed>,
+     *   request_uri: ?string, method: ?string, user_ref: ?string, trace_preview: ?string
+     * }
+     */
+    private static function hydrateOccurrence(array $row): array
+    {
+        return [
+            'id' => (int) $row['id'],
+            'occurred_at' => new \DateTimeImmutable((string) $row['occurred_at']),
+            'context' => json_decode((string) $row['context_json'], true) ?: [],
+            'request_uri' => $row['request_uri'] !== null ? (string) $row['request_uri'] : null,
+            'method' => $row['method'] !== null ? (string) $row['method'] : null,
+            'user_ref' => $row['user_ref'] !== null ? (string) $row['user_ref'] : null,
+            'trace_preview' => $row['trace_preview'] !== null ? (string) $row['trace_preview'] : null,
+        ];
     }
 
     /**

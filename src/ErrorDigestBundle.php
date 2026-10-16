@@ -4,14 +4,41 @@ declare(strict_types=1);
 
 namespace Hexis\ErrorDigestBundle;
 
+use Hexis\ErrorDigestBundle\Domain\PiiScrubber;
 use Symfony\Component\Config\Definition\Configurator\DefinitionConfigurator;
+use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Exception\InvalidArgumentException;
 use Symfony\Component\DependencyInjection\Loader\Configurator\ContainerConfigurator;
 use Symfony\Component\HttpKernel\Bundle\AbstractBundle;
 
 final class ErrorDigestBundle extends AbstractBundle
 {
     protected string $extensionAlias = 'error_digest';
+
+    public function build(ContainerBuilder $container): void
+    {
+        parent::build($container);
+
+        // The host's services are only visible once the container compiles.
+        $container->addCompilerPass(new class implements CompilerPassInterface {
+            public function process(ContainerBuilder $container): void
+            {
+                $id = $container->hasParameter('error_digest.scrubber') ? $container->getParameter('error_digest.scrubber') : null;
+                if ($id === null) {
+                    return;
+                }
+                if (!$container->has((string) $id)) {
+                    throw new InvalidArgumentException(sprintf('error_digest.scrubber: service "%s" does not exist.', $id));
+                }
+
+                $class = $container->getParameterBag()->resolveValue($container->findDefinition((string) $id)->getClass());
+                if (\is_string($class) && !is_a($class, PiiScrubber::class, true)) {
+                    throw new InvalidArgumentException(sprintf('error_digest.scrubber: service "%s" (%s) does not implement %s.', $id, $class, PiiScrubber::class));
+                }
+            }
+        });
+    }
 
     public function configure(DefinitionConfigurator $definition): void
     {
@@ -201,6 +228,10 @@ final class ErrorDigestBundle extends AbstractBundle
             'error_digest.connection',
             sprintf('doctrine.dbal.%s_connection', $config['storage']['connection']),
         );
+
+        if ($config['scrubber'] !== null) {
+            $builder->setAlias(PiiScrubber::class, (string) $config['scrubber']);
+        }
     }
 
     public function prependExtension(ContainerConfigurator $container, ContainerBuilder $builder): void
