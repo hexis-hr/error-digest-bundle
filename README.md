@@ -392,6 +392,8 @@ error_digest:
 - **`connection`** — which DBAL connection the handler and digest builder use for reads/writes. Defaults to `default`.
 - **`entity_manager`** (since v0.1.1) — which EntityManager gets the `ErrorDigest` mapping. Defaults to `null` which lands on the default EM. Set this to the EM that owns your non-default connection so `doctrine:schema:update --em=<name>` and `doctrine:migrations:migrate --em=<name>` operate on the right schema.
 
+If another EntityManager has `auto_mapping: true`, Doctrine maps the bundle there as well. Exclude it on that EM with `mappings: { ErrorDigestBundle: false }`.
+
 For a typical `default` (tenant) + `superadmin` (global) two-EM setup, point both settings at `superadmin`. Then run the bundle's migration against that EM once:
 
 ```bash

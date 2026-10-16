@@ -240,10 +240,12 @@ final class ErrorDigestBundle extends AbstractBundle
         $entityManager = $this->resolveConfiguredEntityManager($builder);
 
         if ($builder->hasExtension('doctrine')) {
+            // config/doctrine under getPath() is where DoctrineBundle's auto_mapping looks for
+            // this bundle's mapping too, so a host that auto-maps bundles gets the same mapping.
             $mapping = [
                 'ErrorDigest' => [
                     'type' => 'xml',
-                    'dir' => $bundlePath . '/src/Resources/config/doctrine',
+                    'dir' => $bundlePath . '/config/doctrine',
                     'prefix' => 'Hexis\\ErrorDigestBundle\\Entity',
                     'alias' => 'ErrorDigest',
                     'is_bundle' => false,
