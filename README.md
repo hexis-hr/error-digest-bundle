@@ -216,7 +216,7 @@ bin/console error-digest:list --since=1d --limit=20 > open-errors.json
 }
 ```
 
-`latest_occurrence` is the most recent occurrence row (`null` once pruned); `release` is set for browser errors. No personal data is printed: `message`, `trace_preview` and `request_uri` pass through the configured `PiiScrubber`, query strings and fragments are cut from `request_uri`, and occurrence context and user references are left out.
+`latest_occurrence` is the most recent occurrence row (`null` once pruned); `release` is set for browser errors. `message`, `trace_preview` and `request_uri` pass through the configured `PiiScrubber`, query strings and fragments are cut from `request_uri`, and occurrence context and user references are left out. The export is scrubbed, not anonymized: the default scrubber masks only the patterns listed under [PII scrubbing](#pii-scrubbing), so names, e-mail addresses and other personal data in free text are printed as stored. Review an export before sharing it, or configure a stricter `PiiScrubber`.
 
 ---
 
