@@ -153,6 +153,15 @@ bin/console doctrine:migrations:migrate --no-interaction
 
 Two tables are created: `err_fingerprint` (lifetime state per error signature) and `err_occurrence` (rolling event log).
 
+### Upgrading from v0.3.x
+
+No PHP API changed (`PiiScrubber`, `Writer` and the service constructors are as they were), but these behaviour changes can break a host:
+
+- **The Doctrine mapping moved** from `src/Resources/config/doctrine` to `config/doctrine` at the package root, where `doctrine.orm.auto_mapping` finds it, so a host on the Symfony recipe's Doctrine config builds as is. Remove `mappings: { ErrorDigestBundle: false }` if you added it only to get the container to build (keep it on another entity manager that auto-maps, see [Multi-tenant](#multi-tenant--separate-connection-setups)), and point any config of yours that names the old directory at the new one.
+- **Your config wins over the bundle's.** The Monolog, Doctrine and migrations config the bundle adds is prepended, so where your config sets the same key, your value is used now. The `error_digest` Monolog handler now runs before the handlers of your config (it ran after them), so a handler of yours with `bubble: false` no longer hides records from it.
+- **What is stored is scrubbed**: the message, trace preview, request URI and context of server errors, and every text of browser errors, with URLs cut at their query string. `DefaultPiiScrubber` also masks e-mail addresses, URL query strings, fragments and credentials, and card-number integers, keeps objects by class name only, and fails closed. Rows stored before the upgrade are not rewritten.
+- **A resolved fingerprint that occurs again is open again** (a muted one stays muted).
+
 ---
 
 ## Trigger the digest
