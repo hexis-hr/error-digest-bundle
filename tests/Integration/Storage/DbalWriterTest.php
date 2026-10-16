@@ -70,6 +70,33 @@ final class DbalWriterTest extends TestCase
         self::assertSame(6, (int) $row['occurrence_count']);
     }
 
+    public function testARecurringResolvedFingerprintIsOpenAgainAndKeepsItsAssignee(): void
+    {
+        $this->emit('abc', Level::Error, 1);
+        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'resolved', resolved_at = '2026-10-01 08:00:00', assignee_id = 'ivan'");
+
+        $this->emit('abc', Level::Error, 1);
+
+        $row = $this->connection->fetchAssociative('SELECT * FROM err_fingerprint');
+        self::assertSame('open', $row['status']);
+        self::assertNull($row['resolved_at']);
+        self::assertSame('ivan', $row['assignee_id']);
+        self::assertSame(2, (int) $row['occurrence_count']);
+    }
+
+    public function testARecurringMutedFingerprintStaysMuted(): void
+    {
+        $this->emit('abc', Level::Error, 1);
+        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'muted', assignee_id = 'ivan'");
+
+        $this->emit('abc', Level::Error, 1);
+
+        $row = $this->connection->fetchAssociative('SELECT * FROM err_fingerprint');
+        self::assertSame('muted', $row['status']);
+        self::assertSame('ivan', $row['assignee_id']);
+        self::assertSame(2, (int) $row['occurrence_count']);
+    }
+
     public function testDistinctFingerprintsGetDistinctRows(): void
     {
         $this->emit('abc', Level::Error, 1);

@@ -86,27 +86,38 @@ final class DbalWriter implements Writer
         $firstSeenSql = $buffered->firstSeenAt->format('Y-m-d H:i:s');
         $lastSeenSql = $buffered->lastSeenAt->format('Y-m-d H:i:s');
 
+        // A new occurrence reopens a resolved fingerprint; a muted one stays muted and the
+        // assignee stays. resolved_at comes before status: MySQL assigns in order, and the
+        // CASE has to read the old status.
         if ($platform instanceof AbstractMySQLPlatform) {
             $sql = sprintf(
-                'INSERT INTO %s (fingerprint, level, level_name, message, exception_class, file, line, channel, environment, first_seen_at, last_seen_at, occurrence_count, status)
+                'INSERT INTO %1$s (fingerprint, level, level_name, message, exception_class, file, line, channel, environment, first_seen_at, last_seen_at, occurrence_count, status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE
+                    resolved_at = CASE WHEN status = \'%2$s\' THEN NULL ELSE resolved_at END,
+                    status = CASE WHEN status = \'%2$s\' THEN \'%3$s\' ELSE status END,
                     last_seen_at = CASE WHEN VALUES(last_seen_at) > last_seen_at THEN VALUES(last_seen_at) ELSE last_seen_at END,
                     occurrence_count = occurrence_count + VALUES(occurrence_count),
                     level_name = CASE WHEN VALUES(level) > level THEN VALUES(level_name) ELSE level_name END,
                     level = CASE WHEN VALUES(level) > level THEN VALUES(level) ELSE level END',
                 $this->fingerprintTable,
+                ErrorFingerprint::STATUS_RESOLVED,
+                ErrorFingerprint::STATUS_OPEN,
             );
         } elseif ($platform instanceof PostgreSQLPlatform || $platform instanceof SqlitePlatform) {
             $sql = sprintf(
                 'INSERT INTO %1$s (fingerprint, level, level_name, message, exception_class, file, line, channel, environment, first_seen_at, last_seen_at, occurrence_count, status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (fingerprint) DO UPDATE SET
+                    resolved_at = CASE WHEN %1$s.status = \'%2$s\' THEN NULL ELSE %1$s.resolved_at END,
+                    status = CASE WHEN %1$s.status = \'%2$s\' THEN \'%3$s\' ELSE %1$s.status END,
                     last_seen_at = CASE WHEN EXCLUDED.last_seen_at > %1$s.last_seen_at THEN EXCLUDED.last_seen_at ELSE %1$s.last_seen_at END,
                     occurrence_count = %1$s.occurrence_count + EXCLUDED.occurrence_count,
                     level_name = CASE WHEN EXCLUDED.level > %1$s.level THEN EXCLUDED.level_name ELSE %1$s.level_name END,
                     level = CASE WHEN EXCLUDED.level > %1$s.level THEN EXCLUDED.level ELSE %1$s.level END',
                 $this->fingerprintTable,
+                ErrorFingerprint::STATUS_RESOLVED,
+                ErrorFingerprint::STATUS_OPEN,
             );
         } else {
             throw new \RuntimeException('Unsupported database platform: ' . $platform::class);

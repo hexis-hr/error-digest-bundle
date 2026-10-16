@@ -285,6 +285,8 @@ Once wired, the dashboard is at `{route_prefix}/` (default `/_errors/`). Require
 | Status | `POST /_errors/fingerprint/{id}/status` | Mark resolved / muted / re-open |
 | Assign | `POST /_errors/fingerprint/{id}/assign` | Set an assignee (free-form string ref — email or user id) |
 
+A resolved fingerprint that occurs again (server or browser) is open again, with its assignee kept; a muted one stays muted.
+
 CSRF tokens are required on both POST endpoints and are baked into the templates via `csrf_token()`.
 
 The templates use Bootstrap 5 via CDN by default. Override with your own by placing files in `templates/bundles/ErrorDigestBundle/`.

@@ -43,6 +43,31 @@ final class JsIngesterTest extends TestCase
         self::assertSame(3, (int) $this->connection->fetchOne('SELECT COUNT(*) FROM err_occurrence'));
     }
 
+    public function testARecurringResolvedFingerprintIsOpenAgainAndKeepsItsAssignee(): void
+    {
+        $this->ingester->ingest($this->event(new \DateTimeImmutable()), 'prod');
+        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'resolved', resolved_at = '2026-10-01 08:00:00', assignee_id = 'ivan'");
+
+        $this->ingester->ingest($this->event(new \DateTimeImmutable()), 'prod');
+
+        $row = $this->connection->fetchAssociative('SELECT * FROM err_fingerprint');
+        self::assertSame('open', $row['status']);
+        self::assertNull($row['resolved_at']);
+        self::assertSame('ivan', $row['assignee_id']);
+    }
+
+    public function testARecurringMutedFingerprintStaysMuted(): void
+    {
+        $this->ingester->ingest($this->event(new \DateTimeImmutable()), 'prod');
+        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'muted', assignee_id = 'ivan'");
+
+        $this->ingester->ingest($this->event(new \DateTimeImmutable()), 'prod');
+
+        $row = $this->connection->fetchAssociative('SELECT * FROM err_fingerprint');
+        self::assertSame('muted', $row['status']);
+        self::assertSame('ivan', $row['assignee_id']);
+    }
+
     public function testScrubsWhatTheBrowserSendsBeforeStorage(): void
     {
         $this->ingester->ingest(new JsEvent(
