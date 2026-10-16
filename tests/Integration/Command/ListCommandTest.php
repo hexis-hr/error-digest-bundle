@@ -316,6 +316,17 @@ final class ListCommandTest extends TestCase
         yield 'terminal' => [true];
     }
 
+    public function testInvalidUtf8IsSubstitutedInsteadOfFailingTheListing(): void
+    {
+        $id = $this->seedFingerprint('abc', lastSeenAt: '-1 minute', message: "Bad byte \xB1 in input");
+        $this->seedOccurrence($id, '-1 minute', uri: '/a', trace: "RuntimeException: Bad byte \xB1 in input");
+
+        $item = $this->listJson([])['items'][0];
+
+        self::assertSame("Bad byte \u{FFFD} in input", $item['message']);
+        self::assertSame("RuntimeException: Bad byte \u{FFFD} in input", $item['latest_occurrence']['trace_preview']);
+    }
+
     /**
      * @param array<string, string> $options
      * @return array<string, mixed>
