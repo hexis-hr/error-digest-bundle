@@ -134,7 +134,10 @@ final class ListCommand extends Command
             return (new \DateTimeImmutable())->modify(sprintf('-%d %s', $match[1], $unit));
         }
 
-        return (\DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $since)
-            ?: \DateTimeImmutable::createFromFormat('!Y-m-d', $since)) ?: null;
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $since)
+            ?: \DateTimeImmutable::createFromFormat('!Y-m-d', $since);
+
+        // createFromFormat() rolls impossible dates over (2026-02-30 becomes 2026-03-02) and only warns.
+        return $date !== false && \DateTimeImmutable::getLastErrors() === false ? $date : null;
     }
 }
