@@ -10,12 +10,16 @@ use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Platforms\SqlitePlatform;
 use Hexis\ErrorDigestBundle\Domain\PiiScrubber;
+use Hexis\ErrorDigestBundle\Domain\StorageScrubber;
 use Hexis\ErrorDigestBundle\Entity\ErrorFingerprint;
 
 /**
  * Writes a browser-reported error into the same err_fingerprint / err_occurrence
  * tables as server-side captures. Channel is always "js" so the existing UI
  * filter lets admins view server vs browser errors separately.
+ *
+ * Every text the browser sends passes the PiiScrubber before it is stored; the
+ * page and source URLs lose their query string and fragment first.
  */
 final class JsIngester
 {
@@ -23,18 +27,22 @@ final class JsIngester
     private const LEVEL = 400;               // Monolog::ERROR
     private const LEVEL_NAME = 'error';
 
+    private readonly StorageScrubber $scrubber;
+
     public function __construct(
         private readonly Connection $connection,
         private readonly JsFingerprinter $fingerprinter,
-        private readonly PiiScrubber $scrubber,
+        PiiScrubber $scrubber,
         private readonly string $fingerprintTable,
         private readonly string $occurrenceTable,
     ) {
+        $this->scrubber = new StorageScrubber($scrubber);
     }
 
     public function ingest(JsEvent $event, string $environment): void
     {
         $fingerprint = $this->fingerprinter->fingerprint($event);
+        $event = $this->scrubbed($event);
 
         $this->connection->beginTransaction();
         try {
@@ -118,9 +126,35 @@ final class JsIngester
         return (int) $id;
     }
 
+    private function scrubbed(JsEvent $event): JsEvent
+    {
+        $text = $this->scrubber->texts([
+            'message' => $event->message,
+            'exception_type' => $event->exceptionType,
+            'source_url' => StorageScrubber::withoutQuery($event->sourceUrl),
+            'stack' => $event->stack,
+            'page_url' => StorageScrubber::withoutQuery($event->pageUrl),
+            'user_ref' => $event->userRef,
+        ]);
+
+        return new JsEvent(
+            message: (string) $text['message'],
+            exceptionType: $text['exception_type'],
+            sourceUrl: $text['source_url'],
+            line: $event->line,
+            column: $event->column,
+            stack: $text['stack'],
+            pageUrl: $text['page_url'],
+            userAgent: $event->userAgent,
+            release: $event->release,
+            userRef: $text['user_ref'],
+            occurredAt: $event->occurredAt,
+        );
+    }
+
     private function insertOccurrence(int $fingerprintId, JsEvent $event): void
     {
-        $context = $this->scrubber->scrub(array_filter([
+        $context = $this->scrubber->context(array_filter([
             'source_url' => $event->sourceUrl,
             'line' => $event->line,
             'column' => $event->column,

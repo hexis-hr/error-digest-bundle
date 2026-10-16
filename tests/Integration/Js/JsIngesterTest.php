@@ -43,6 +43,33 @@ final class JsIngesterTest extends TestCase
         self::assertSame(3, (int) $this->connection->fetchOne('SELECT COUNT(*) FROM err_occurrence'));
     }
 
+    public function testScrubsWhatTheBrowserSendsBeforeStorage(): void
+    {
+        $this->ingester->ingest(new JsEvent(
+            message: 'Cannot save jane@example.com',
+            exceptionType: 'Error',
+            sourceUrl: 'https://example.com/build/app.js?signature=abc',
+            line: 10,
+            column: 5,
+            stack: "Error: Cannot save jane@example.com\n    at save (https://example.com/build/app.js?signature=abc:10:5)",
+            pageUrl: 'https://example.com/reset-password?token=abc#form',
+            userAgent: 'Mozilla/5.0',
+            release: null,
+            userRef: 'jane@example.com',
+            occurredAt: new \DateTimeImmutable(),
+        ), 'prod');
+
+        $fingerprint = $this->connection->fetchAssociative('SELECT * FROM err_fingerprint');
+        self::assertSame('Cannot save [REDACTED]', $fingerprint['message']);
+        self::assertSame('https://example.com/build/app.js', $fingerprint['file']);
+
+        $occurrence = $this->connection->fetchAssociative('SELECT * FROM err_occurrence');
+        self::assertSame("Error: Cannot save [REDACTED]\n    at save (https://example.com/build/app.js?[REDACTED]", $occurrence['trace_preview']);
+        self::assertSame('https://example.com/reset-password', $occurrence['request_uri']);
+        self::assertSame('[REDACTED]', $occurrence['user_ref']);
+        self::assertSame('https://example.com/build/app.js', json_decode($occurrence['context_json'], true)['source_url']);
+    }
+
     private function event(\DateTimeImmutable $occurredAt): JsEvent
     {
         return new JsEvent(

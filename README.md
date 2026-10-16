@@ -216,7 +216,7 @@ bin/console error-digest:list --since=1d --limit=20 > open-errors.json
 }
 ```
 
-`latest_occurrence` is the most recent occurrence row (`null` once pruned); `release` is set for browser errors. `message`, `trace_preview` and `request_uri` pass through the configured `PiiScrubber`, query strings and fragments are cut from `request_uri`, and occurrence context and user references are left out. The export is scrubbed, not anonymized: the default scrubber masks only the patterns listed under [PII scrubbing](#pii-scrubbing), so names, phone numbers, postal addresses and other personal data in free text are printed as stored. Review an export before sharing it, or configure a stricter `PiiScrubber`.
+`latest_occurrence` is the most recent occurrence row (`null` once pruned); `release` is set for browser errors. `message`, `trace_preview` and `request_uri` are stored scrubbed and pass through the configured `PiiScrubber` again (rows stored by older versions are not), query strings and fragments are cut from `request_uri`, and occurrence context and user references are left out. The export is scrubbed, not anonymized: the default scrubber masks only the patterns listed under [PII scrubbing](#pii-scrubbing), so names, phone numbers, postal addresses and other personal data in free text are printed as stored. Review an export before sharing it, or configure a stricter `PiiScrubber`.
 
 ---
 
@@ -251,7 +251,9 @@ error_digest:
 
 ### PII scrubbing
 
-`DefaultPiiScrubber` runs over every occurrence's context before it hits the database. It redacts:
+Everything the bundle stores passes the configured scrubber first: the message, the trace preview, the request URI and the context of every occurrence (`_extra` included), and for browser errors the message, type, source and page URL, stack and user reference. URLs (the request URI, the referrer, the page and source URL of a browser error) lose their query string and fragment before that, and objects in the context are stored by class name only, whatever the scrubber returns. A text the scrubber drops or turns into a non-string is stored as `[REDACTED]`.
+
+`DefaultPiiScrubber`, the scrubber unless `error_digest.scrubber` names another, redacts:
 
 - Keys matching (case-insensitive, substring): `password`, `token`, `authorization`, `cookie`, `session`, `csrf`, `jwt`, `api_key`, `secret`, etc.
 - Credit-card-shaped number sequences anywhere in values, and integers of 13 to 19 digits.

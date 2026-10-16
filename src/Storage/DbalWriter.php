@@ -10,25 +10,34 @@ use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Platforms\SqlitePlatform;
 use Hexis\ErrorDigestBundle\Domain\PiiScrubber;
+use Hexis\ErrorDigestBundle\Domain\StorageScrubber;
 use Hexis\ErrorDigestBundle\Entity\ErrorFingerprint;
 
 /**
  * Direct DBAL writer. Uses its own connection so it doesn't entangle with the
  * host's EntityManager unit-of-work or transaction boundaries.
+ *
+ * Message, trace preview, request URI and context pass the PiiScrubber before
+ * they are stored; URLs lose their query string and fragment first.
  */
 final class DbalWriter implements Writer
 {
+    /** Request URLs that Monolog's WebProcessor adds to a record's extra. */
+    private const EXTRA_URLS = ['url', 'referrer'];
+
     private ?Connection $connection = null;
+    private readonly StorageScrubber $scrubber;
 
     /**
      * @param \Closure(): Connection $connectionFactory
      */
     public function __construct(
         private readonly \Closure $connectionFactory,
-        private readonly PiiScrubber $scrubber,
+        PiiScrubber $scrubber,
         private readonly string $fingerprintTable,
         private readonly string $occurrenceTable,
     ) {
+        $this->scrubber = new StorageScrubber($scrubber);
     }
 
     private function connection(): Connection
@@ -68,6 +77,7 @@ final class DbalWriter implements Writer
         $level = $record->level->value;
         $levelName = strtolower($record->level->getName());
         $message = $exception instanceof \Throwable ? $exception->getMessage() : $record->message;
+        $message = $this->scrubber->texts(['message' => $message])['message'];
         $exceptionClass = $exception instanceof \Throwable ? $exception::class : null;
         $file = $exception instanceof \Throwable ? $exception->getFile() : null;
         $line = $exception instanceof \Throwable ? $exception->getLine() : null;
@@ -150,19 +160,25 @@ final class DbalWriter implements Writer
         $context = $record->context;
         $exception = $context['exception'] ?? null;
         unset($context['exception']);
-        $context = $this->scrubber->scrub($context);
+        $context = $this->scrubber->context($context);
 
-        $extra = $this->scrubber->scrub($record->extra);
+        $extra = $record->extra;
+        foreach (self::EXTRA_URLS as $key) {
+            if (\is_string($extra[$key] ?? null)) {
+                $extra[$key] = StorageScrubber::withoutQuery($extra[$key]);
+            }
+        }
+        $extra = $this->scrubber->context($extra);
         if ($extra !== []) {
             $context['_extra'] = $extra;
         }
 
-        $tracePreview = null;
-        if ($exception instanceof \Throwable) {
-            $tracePreview = $this->formatTracePreview($exception);
-        }
-
-        $requestUri = \is_string($record->extra['url'] ?? null) ? $record->extra['url'] : null;
+        $text = $this->scrubber->texts([
+            'trace' => $exception instanceof \Throwable ? $this->formatTracePreview($exception) : null,
+            'uri' => StorageScrubber::withoutQuery(\is_string($record->extra['url'] ?? null) ? $record->extra['url'] : null),
+        ]);
+        $tracePreview = $text['trace'];
+        $requestUri = $text['uri'];
         $method = \is_string($record->extra['http_method'] ?? null) ? $record->extra['http_method'] : null;
 
         $this->connection()->executeStatement(

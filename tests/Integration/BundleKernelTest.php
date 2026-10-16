@@ -92,6 +92,8 @@ final class BundleKernelTest extends KernelTestCase
         $connection = self::getContainer()->get('doctrine.dbal.default_connection');
         $context = json_decode((string) $connection->fetchOne('SELECT context_json FROM err_occurrence'), true, flags: \JSON_THROW_ON_ERROR);
         self::assertSame('[EMAIL]', $context['contact'], 'Capture scrubs the occurrence context with the configured scrubber.');
+        self::assertSame('Partner [EMAIL] could not be saved', $connection->fetchOne('SELECT message FROM err_fingerprint'), 'Capture scrubs the stored message.');
+        self::assertStringStartsWith('RuntimeException: Partner [EMAIL] could not be saved', (string) $connection->fetchOne('SELECT trace_preview FROM err_occurrence'));
 
         $item = $this->listJson([])['items'][0];
         self::assertSame('Partner [EMAIL] could not be saved', $item['message']);
