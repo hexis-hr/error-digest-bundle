@@ -85,8 +85,11 @@ final class TestKernel extends Kernel
             ],
         ]);
 
+        $container->register(EmailMaskingScrubber::class);
+
         $container->loadFromExtension('error_digest', [
             'environments' => ['test'],
+            'scrubber' => EmailMaskingScrubber::class,
             'ignore' => [
                 ['class' => NotFoundHttpException::class],
                 ['class' => AccessDeniedException::class],

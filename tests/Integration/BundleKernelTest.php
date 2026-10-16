@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Hexis\ErrorDigestBundle\Tests\Integration;
 
 use Doctrine\DBAL\Connection;
+use Hexis\ErrorDigestBundle\Monolog\ErrorDigestHandler;
+use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Console\Command\Command;
@@ -74,6 +76,27 @@ final class BundleKernelTest extends KernelTestCase
         self::assertNull($item['latest_occurrence']['release']);
         self::assertStringStartsWith('RuntimeException: Upstream rejected Bearer [REDACTED]', $item['latest_occurrence']['trace_preview']);
         self::assertStringNotContainsString('abc.def-123', $this->console->getDisplay());
+    }
+
+    public function testTheConfiguredScrubberRedactsCaptureAndExport(): void
+    {
+        $message = 'Partner jane@example.com could not be saved';
+        /** @var LoggerInterface $logger */
+        $logger = self::getContainer()->get('logger');
+        $logger->error($message, ['exception' => new \RuntimeException($message), 'contact' => 'jane@example.com']);
+        /** @var ErrorDigestHandler $handler */
+        $handler = self::getContainer()->get(ErrorDigestHandler::class);
+        $handler->flushBuffer();
+
+        /** @var Connection $connection */
+        $connection = self::getContainer()->get('doctrine.dbal.default_connection');
+        $context = json_decode((string) $connection->fetchOne('SELECT context_json FROM err_occurrence'), true, flags: \JSON_THROW_ON_ERROR);
+        self::assertSame('[EMAIL]', $context['contact'], 'Capture scrubs the occurrence context with the configured scrubber.');
+
+        $item = $this->listJson([])['items'][0];
+        self::assertSame('Partner [EMAIL] could not be saved', $item['message']);
+        self::assertStringStartsWith('RuntimeException: Partner [EMAIL] could not be saved', $item['latest_occurrence']['trace_preview']);
+        self::assertStringNotContainsString('jane@example.com', $this->console->getDisplay());
     }
 
     public function testPruneDropsOccurrencesAndKeepsTheFingerprint(): void
