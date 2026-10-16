@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Hexis\ErrorDigestBundle\Tests\Integration\Command;
 
+use Doctrine\DBAL\Configuration;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\DriverManager;
+use Doctrine\DBAL\Logging\Middleware;
 use Hexis\ErrorDigestBundle\Command\ListCommand;
 use Hexis\ErrorDigestBundle\Domain\DefaultPiiScrubber;
 use Hexis\ErrorDigestBundle\Storage\DbalWriter;
@@ -12,6 +15,7 @@ use Hexis\ErrorDigestBundle\Storage\FingerprintReader;
 use Hexis\ErrorDigestBundle\Tests\Integration\SchemaFactory;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\AbstractLogger;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -292,6 +296,41 @@ final class ListCommandTest extends TestCase
         $this->seedOccurrence($id, '2026-01-10 12:00:00', uri: '/second', trace: 'trace');
 
         self::assertSame('/second', $this->listJson([])['items'][0]['latest_occurrence']['request_uri']);
+    }
+
+    public function testFetchesTheLatestOccurrencesOfAllItemsInOneQuery(): void
+    {
+        $logger = new class extends AbstractLogger {
+            /** @var list<string> */
+            public array $queries = [];
+
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                if (isset($context['sql'])) {
+                    $this->queries[] = (string) $context['sql'];
+                }
+            }
+        };
+        $this->connection = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'memory' => true], (new Configuration())->setMiddlewares([new Middleware($logger)]));
+        SchemaFactory::install($this->connection);
+        $reader = new FingerprintReader($this->connection, SchemaFactory::FINGERPRINT_TABLE, SchemaFactory::OCCURRENCE_TABLE);
+        $this->tester = new CommandTester(new ListCommand($reader, new DefaultPiiScrubber()));
+
+        foreach ([1, 2, 3, 4, 5] as $i) {
+            $id = $this->seedFingerprint('fp' . $i, lastSeenAt: sprintf('-%d minutes', $i));
+            $this->seedOccurrence($id, '-1 hour', uri: '/old/' . $i, trace: 'trace');
+            $this->seedOccurrence($id, sprintf('-%d minutes', $i), uri: '/new/' . $i, trace: 'trace');
+        }
+        $this->seedFingerprint('pruned', lastSeenAt: '-10 minutes');
+        $logger->queries = [];
+
+        $items = $this->listJson([])['items'];
+
+        self::assertSame(
+            ['/new/1', '/new/2', '/new/3', '/new/4', '/new/5', null],
+            array_map(static fn (array $item): ?string => $item['latest_occurrence']['request_uri'] ?? null, $items),
+        );
+        self::assertCount(3, $logger->queries, 'The page, its total and the latest occurrences: ' . implode("\n", $logger->queries));
     }
 
     #[DataProvider('decoration')]

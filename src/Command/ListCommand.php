@@ -69,6 +69,7 @@ final class ListCommand extends Command
             'status' => $status === 'all' ? null : $status,
             'since' => $since,
         ], $limit, 0);
+        $latest = $this->reader->latestOccurrences(array_map(static fn (FingerprintSummary $fp): int => $fp->id, $result['rows']));
 
         $output->writeln(json_encode([
             'generated_at' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
@@ -78,7 +79,7 @@ final class ListCommand extends Command
                 'limit' => $limit,
             ],
             'total' => $result['total'],
-            'items' => array_map($this->item(...), $result['rows']),
+            'items' => array_map(fn (FingerprintSummary $fp): array => $this->item($fp, $latest[$fp->id] ?? null), $result['rows']),
         ], \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_INVALID_UTF8_SUBSTITUTE | \JSON_THROW_ON_ERROR), OutputInterface::OUTPUT_RAW);
 
         return Command::SUCCESS;
@@ -89,11 +90,14 @@ final class ListCommand extends Command
      * fingerprint message and trace are stored unscrubbed, and occurrence context,
      * user reference and query strings are left out.
      *
+     * @param array{
+     *   id: int, occurred_at: \DateTimeImmutable, context: array<string, mixed>,
+     *   request_uri: ?string, method: ?string, user_ref: ?string, trace_preview: ?string
+     * }|null $latest
      * @return array<string, mixed>
      */
-    private function item(FingerprintSummary $fp): array
+    private function item(FingerprintSummary $fp, ?array $latest): array
     {
-        $latest = $this->reader->occurrences($fp->id, 1)[0] ?? null;
         $uri = $latest['request_uri'] ?? null;
 
         $text = $this->scrubber->scrub([

@@ -14,6 +14,8 @@ final class FingerprintReaderTest extends TestCase
 {
     private Connection $connection;
     private FingerprintReader $reader;
+    /** @var array<string, int> */
+    private array $ids = [];
 
     protected function setUp(): void
     {
@@ -59,6 +61,24 @@ final class FingerprintReaderTest extends TestCase
         self::assertSame(['latest', 'after-resolved', 'boundary', 'before'], $this->fingerprints($result['rows']));
     }
 
+    public function testLatestOccurrencesTakesEachFingerprintsLatestAndBreaksTiesById(): void
+    {
+        $later = $this->seedOccurrence('before', '2026-01-10 11:59:59');
+        $this->seedOccurrence('before', '2026-01-10 11:00:00');
+        $this->seedOccurrence('boundary', '2026-01-10 12:00:00');
+        $tieInsertedLast = $this->seedOccurrence('boundary', '2026-01-10 12:00:00');
+        $this->seedOccurrence('latest', '2026-01-11 08:00:00');
+
+        $latest = $this->reader->latestOccurrences([$this->ids['before'], $this->ids['boundary'], $this->ids['after-resolved']]);
+        ksort($latest);
+
+        self::assertSame(
+            [$this->ids['before'] => $later, $this->ids['boundary'] => $tieInsertedLast],
+            array_map(static fn (array $occurrence): int => $occurrence['id'], $latest),
+        );
+        self::assertSame([], $this->reader->latestOccurrences([]));
+    }
+
     /**
      * @param list<FingerprintSummary> $rows
      * @return list<string>
@@ -74,5 +94,16 @@ final class FingerprintReaderTest extends TestCase
             'INSERT INTO err_fingerprint (fingerprint, level, level_name, message, channel, environment, first_seen_at, last_seen_at, occurrence_count, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             [$fingerprint, 400, 'error', 'seed message for ' . $fingerprint, 'app', 'test', '2026-01-01 00:00:00', $lastSeenAt, 1, $status],
         );
+        $this->ids[$fingerprint] = (int) $this->connection->lastInsertId();
+    }
+
+    private function seedOccurrence(string $fingerprint, string $occurredAt): int
+    {
+        $this->connection->executeStatement(
+            'INSERT INTO err_occurrence (fingerprint_id, occurred_at, context_json) VALUES (?, ?, ?)',
+            [$this->ids[$fingerprint], $occurredAt, '{}'],
+        );
+
+        return (int) $this->connection->lastInsertId();
     }
 }
