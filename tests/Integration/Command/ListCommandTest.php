@@ -294,6 +294,28 @@ final class ListCommandTest extends TestCase
         self::assertSame('/second', $this->listJson([])['items'][0]['latest_occurrence']['request_uri']);
     }
 
+    #[DataProvider('decoration')]
+    public function testConsoleTagsInMessagesAreWrittenVerbatim(bool $decorated): void
+    {
+        $id = $this->seedFingerprint('abc', lastSeenAt: '-1 minute', message: 'Template <info>name</info> failed');
+        $this->seedOccurrence($id, '-1 minute', uri: '/a', trace: 'RuntimeException: <error>boom</error>');
+
+        self::assertSame(Command::SUCCESS, $this->tester->execute([], ['capture_stderr_separately' => true, 'decorated' => $decorated]));
+        $item = json_decode($this->tester->getDisplay(), true, flags: \JSON_THROW_ON_ERROR)['items'][0];
+
+        self::assertSame('Template <info>name</info> failed', $item['message']);
+        self::assertSame('RuntimeException: <error>boom</error>', $item['latest_occurrence']['trace_preview']);
+    }
+
+    /**
+     * @return iterable<string, array{bool}>
+     */
+    public static function decoration(): iterable
+    {
+        yield 'redirected' => [false];
+        yield 'terminal' => [true];
+    }
+
     /**
      * @param array<string, string> $options
      * @return array<string, mixed>

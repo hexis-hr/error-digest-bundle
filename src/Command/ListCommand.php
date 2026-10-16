@@ -79,7 +79,7 @@ final class ListCommand extends Command
             ],
             'total' => $result['total'],
             'items' => array_map($this->item(...), $result['rows']),
-        ], \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_THROW_ON_ERROR));
+        ], \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_THROW_ON_ERROR), OutputInterface::OUTPUT_RAW);
 
         return Command::SUCCESS;
     }
