@@ -269,7 +269,7 @@ Everything the bundle stores passes the configured scrubber first: the message, 
 - Bearer tokens (`Bearer xxx` → `Bearer [REDACTED]`).
 - JWT-shaped strings (three base64url segments joined by `.`).
 - E-mail addresses.
-- Query strings and fragments of URLs (`https://example.com/reset?[REDACTED]`) and credentials in URLs (`mysql://[REDACTED]@db/app`).
+- Query strings and fragments of absolute and relative URLs (`https://example.com/reset?[REDACTED]`, `/reset?[REDACTED]`) and credentials in URLs (`mysql://[REDACTED]@db/app`); an apostrophe does not end either.
 
 Objects are kept by class name only (`[object App\Entity\Partner]`), never with their properties. If a pattern fails (the PCRE backtrack limit, say), the whole value is replaced with `[REDACTED]`: the scrubber fails closed.
 
