@@ -8,6 +8,8 @@ jobs:
     phpunit:
         name: PHP ${{ matrix.php }}, Symfony ${{ matrix.symfony }}
         runs-on: ubuntu-latest
+        # The organization allows only GitHub-owned actions, so PHP comes from the official image.
+        container: php:${{ matrix.php }}-cli
         strategy:
             fail-fast: false
             matrix:
@@ -18,21 +20,22 @@ jobs:
                       symfony: '7.4.*'
                     - php: '8.4'
                       symfony: '8.*'
+        env:
+            COMPOSER_ALLOW_SUPERUSER: '1'
+            SYMFONY_REQUIRE: ${{ matrix.symfony }}
         steps:
             - uses: actions/checkout@v4
-            - uses: shivammathur/setup-php@v2
-              with:
-                  php-version: ${{ matrix.php }}
-                  extensions: pdo_sqlite
-                  coverage: none
-                  tools: composer:v2
-            - name: Install symfony/flex to pin Symfony
+
+            - name: Install Composer and Symfony Flex
               run: |
+                  apt-get update -qq
+                  apt-get install -y -qq git unzip
+                  curl -fsSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
                   composer global config --no-plugins allow-plugins.symfony/flex true
-                  composer global require --no-interaction --no-progress symfony/flex
+                  composer global require --no-progress --no-scripts --no-plugins symfony/flex
+
             - name: Install dependencies
-              env:
-                  SYMFONY_REQUIRE: ${{ matrix.symfony }}
               run: composer update --no-interaction --prefer-dist --no-progress
+
             - name: Tests
               run: vendor/bin/phpunit
