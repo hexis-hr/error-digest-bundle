@@ -79,7 +79,7 @@ final class FingerprintReader
                 'SELECT id, occurred_at, context_json, request_uri, method, user_ref, trace_preview
                  FROM %s
                  WHERE fingerprint_id = ?
-                 ORDER BY occurred_at DESC
+                 ORDER BY occurred_at DESC, id DESC
                  LIMIT %d',
                 $this->occurrenceTable,
                 max(1, $limit),

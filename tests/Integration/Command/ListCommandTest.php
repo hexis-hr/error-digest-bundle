@@ -285,6 +285,15 @@ final class ListCommandTest extends TestCase
         yield 'non-string release' => [['release' => 7], null];
     }
 
+    public function testLatestOccurrenceIsTheLastInsertedWhenTimestampsTie(): void
+    {
+        $id = $this->seedFingerprint('abc', lastSeenAt: '-1 minute');
+        $this->seedOccurrence($id, '2026-01-10 12:00:00', uri: '/first', trace: 'trace');
+        $this->seedOccurrence($id, '2026-01-10 12:00:00', uri: '/second', trace: 'trace');
+
+        self::assertSame('/second', $this->listJson([])['items'][0]['latest_occurrence']['request_uri']);
+    }
+
     /**
      * @param array<string, string> $options
      * @return array<string, mixed>
