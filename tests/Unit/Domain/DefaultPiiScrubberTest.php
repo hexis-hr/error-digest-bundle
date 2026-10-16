@@ -132,6 +132,32 @@ final class DefaultPiiScrubberTest extends TestCase
         self::assertSame('Connection to mysql://[REDACTED]@db:3306/mis refused', $scrubbed['dsn']);
     }
 
+    public function testMasksQueryStringsAndFragmentsOfRelativeUrls(): void
+    {
+        $scrubbed = $this->scrubber->scrub([
+            'query' => 'Failed GET /reset?token=secretResetValue',
+            'fragment' => 'Redirected to /callback#access_token=secretResetValue',
+            'trace' => '#0 /app/src/Controller/ResetController.php(42): reset()',
+            'question' => 'Is it 1/2? Yes',
+        ]);
+
+        self::assertSame('Failed GET /reset?[REDACTED]', $scrubbed['query']);
+        self::assertSame('Redirected to /callback#[REDACTED]', $scrubbed['fragment']);
+        self::assertSame('#0 /app/src/Controller/ResetController.php(42): reset()', $scrubbed['trace']);
+        self::assertSame('Is it 1/2? Yes', $scrubbed['question']);
+    }
+
+    public function testApostrophesDoNotEndTheMaskedPartOfAUrl(): void
+    {
+        $scrubbed = $this->scrubber->scrub([
+            'query' => "GET https://example.com/reset?name=O'Brien&token=private123 failed",
+            'dsn' => "Connection to mysql://app:pa'ss@db:3306/mis refused",
+        ]);
+
+        self::assertSame('GET https://example.com/reset?[REDACTED] failed', $scrubbed['query']);
+        self::assertSame('Connection to mysql://[REDACTED]@db:3306/mis refused', $scrubbed['dsn']);
+    }
+
     public function testKeepsObjectsByClassNameOnly(): void
     {
         $partner = new class {

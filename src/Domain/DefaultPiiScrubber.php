@@ -16,12 +16,14 @@ final class DefaultPiiScrubber implements PiiScrubber
     ];
 
     /**
-     * Pattern => replacement, in this order: query strings, fragments and credentials of URLs
-     * before e-mail addresses, so user:password@host is not read as an address.
+     * Pattern => replacement, in this order: query strings and fragments of URLs (absolute, or a
+     * relative path such as /reset?token=...), then URL credentials, before e-mail addresses, so
+     * user:password@host is not read as an address. Apostrophes are valid in a query and in
+     * credentials, so they do not end the masked part; credentials run to the last @ of the authority.
      */
     private const TEXT_PATTERNS = [
-        '#\b([a-z][a-z0-9+.-]*://[^\s?\#"\'<>]*)([?\#])[^\s"\'<>]*#i' => '$1$2' . self::REDACTED,
-        '#\b([a-z][a-z0-9+.-]*://)[^/\s@?\#"\'<>]+@#i' => '$1' . self::REDACTED . '@',
+        '#((?:\b[a-z][a-z0-9+.-]*://|/)[^\s?\#"<>]*)([?\#])[^\s"<>]+#i' => '$1$2' . self::REDACTED,
+        '#\b([a-z][a-z0-9+.-]*://)[^/\s?\#"<>]+@#i' => '$1' . self::REDACTED . '@',
         '/[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}/' => self::REDACTED,
         '/\b(?:\d[ -]*?){13,19}\b/' => self::REDACTED,
         '/\bBearer\s+[A-Za-z0-9\-_\.]+\b/i' => 'Bearer ' . self::REDACTED,
