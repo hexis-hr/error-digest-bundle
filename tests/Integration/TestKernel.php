@@ -31,6 +31,9 @@ final class TestKernel extends Kernel
 {
     use MicroKernelTrait;
 
+    /** Environment of a host on the Symfony recipe's Doctrine config: the entity manager auto-maps bundles. */
+    public const AUTO_MAPPING = 'auto_mapping';
+
     public const ADMIN = 'admin';
     public const VIEWER = 'viewer';
     public const PASSWORD = 'secret';
@@ -63,7 +66,7 @@ final class TestKernel extends Kernel
 
         $container->loadFromExtension('doctrine', [
             'dbal' => ['url' => 'sqlite:///:memory:'],
-            'orm' => $this->ormConfig(),
+            'orm' => $this->ormConfig() + ['auto_mapping' => $this->environment === self::AUTO_MAPPING],
         ]);
 
         $container->loadFromExtension('twig', ['strict_variables' => true]);
