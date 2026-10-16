@@ -95,4 +95,67 @@ final class DefaultPiiScrubberTest extends TestCase
         self::assertTrue($scrubbed['enabled']);
         self::assertSame(3.14, $scrubbed['threshold']);
     }
+
+    public function testMasksIntegersThatLookLikeCardNumbers(): void
+    {
+        $scrubbed = $this->scrubber->scrub(['card' => 4111111111111111, 'nested' => [5500000000000004], 'id' => 123456789012]);
+
+        self::assertSame('[REDACTED]', $scrubbed['card']);
+        self::assertSame(['[REDACTED]'], $scrubbed['nested']);
+        self::assertSame(123456789012, $scrubbed['id'], 'Twelve digits are too short for a card number.');
+    }
+
+    public function testMasksEmailAddresses(): void
+    {
+        $scrubbed = $this->scrubber->scrub(['note' => 'Partner jane.doe+mis@example.co.uk could not be saved']);
+
+        self::assertSame('Partner [REDACTED] could not be saved', $scrubbed['note']);
+    }
+
+    public function testMasksQueryStringsAndFragmentsOfUrls(): void
+    {
+        $scrubbed = $this->scrubber->scrub([
+            'query' => 'GET https://api.example.com/v1/partners?email=jane%40example.com&page=2 failed',
+            'fragment' => 'Redirected to https://example.com/callback#access_token=abc',
+            'plain' => 'See https://example.com/docs/errors for details',
+        ]);
+
+        self::assertSame('GET https://api.example.com/v1/partners?[REDACTED] failed', $scrubbed['query']);
+        self::assertSame('Redirected to https://example.com/callback#[REDACTED]', $scrubbed['fragment']);
+        self::assertSame('See https://example.com/docs/errors for details', $scrubbed['plain']);
+    }
+
+    public function testMasksCredentialsInUrls(): void
+    {
+        $scrubbed = $this->scrubber->scrub(['dsn' => 'Connection to mysql://app:s3cret@db:3306/mis refused']);
+
+        self::assertSame('Connection to mysql://[REDACTED]@db:3306/mis refused', $scrubbed['dsn']);
+    }
+
+    public function testKeepsObjectsByClassNameOnly(): void
+    {
+        $partner = new class {
+            public string $email = 'jane@example.com';
+            public string $name = 'Jane Doe';
+        };
+
+        $scrubbed = $this->scrubber->scrub(['partner' => $partner, 'nested' => ['at' => new \DateTimeImmutable('2026-10-15')]]);
+
+        self::assertSame('[object ' . $partner::class . ']', $scrubbed['partner']);
+        self::assertSame('[object DateTimeImmutable]', $scrubbed['nested']['at']);
+    }
+
+    public function testMasksTheWholeValueWhenAPatternFails(): void
+    {
+        $limit = ini_get('pcre.backtrack_limit');
+        ini_set('pcre.backtrack_limit', '1');
+        try {
+            $scrubbed = $this->scrubber->scrub(['message' => 'Card 4111 1111 1111 1111 declined', 'count' => 4111111111111111]);
+        } finally {
+            ini_set('pcre.backtrack_limit', (string) $limit);
+        }
+
+        self::assertSame('[REDACTED]', $scrubbed['message']);
+        self::assertSame('[REDACTED]', $scrubbed['count']);
+    }
 }

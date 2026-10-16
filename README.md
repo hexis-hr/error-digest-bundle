@@ -12,7 +12,7 @@ Built for when logs are a haystack and real errors go under the radar.
 - **Deduplicates** by fingerprint (exception class + file + line + normalized message) so the same error fires once, no matter how many times it occurs.
 - **Rate-limits** within one process — 1000 occurrences of the same error in a second become a single occurrence row with accurate counters.
 - **Stores** in its own `err_fingerprint` + `err_occurrence` tables on whichever Doctrine connection you point it at.
-- **Scrubs** PII (passwords, tokens, bearer headers, JWTs, credit-card patterns) before writing.
+- **Scrubs** PII (passwords, tokens, bearer headers, JWTs, credit-card patterns, e-mail addresses, URL query strings) before writing.
 - **Digests** daily via Mailer + optional Slack/Teams via Notifier. Sections: new, spiking, top, stale.
 - **UI** at a configurable route prefix: list with filters, detail with occurrence timeline, resolve/mute/assign.
 
@@ -216,7 +216,7 @@ bin/console error-digest:list --since=1d --limit=20 > open-errors.json
 }
 ```
 
-`latest_occurrence` is the most recent occurrence row (`null` once pruned); `release` is set for browser errors. `message`, `trace_preview` and `request_uri` pass through the configured `PiiScrubber`, query strings and fragments are cut from `request_uri`, and occurrence context and user references are left out. The export is scrubbed, not anonymized: the default scrubber masks only the patterns listed under [PII scrubbing](#pii-scrubbing), so names, e-mail addresses and other personal data in free text are printed as stored. Review an export before sharing it, or configure a stricter `PiiScrubber`.
+`latest_occurrence` is the most recent occurrence row (`null` once pruned); `release` is set for browser errors. `message`, `trace_preview` and `request_uri` pass through the configured `PiiScrubber`, query strings and fragments are cut from `request_uri`, and occurrence context and user references are left out. The export is scrubbed, not anonymized: the default scrubber masks only the patterns listed under [PII scrubbing](#pii-scrubbing), so names, phone numbers, postal addresses and other personal data in free text are printed as stored. Review an export before sharing it, or configure a stricter `PiiScrubber`.
 
 ---
 
@@ -254,9 +254,13 @@ error_digest:
 `DefaultPiiScrubber` runs over every occurrence's context before it hits the database. It redacts:
 
 - Keys matching (case-insensitive, substring): `password`, `token`, `authorization`, `cookie`, `session`, `csrf`, `jwt`, `api_key`, `secret`, etc.
-- Credit-card-shaped number sequences anywhere in values.
+- Credit-card-shaped number sequences anywhere in values, and integers of 13 to 19 digits.
 - Bearer tokens (`Bearer xxx` → `Bearer [REDACTED]`).
 - JWT-shaped strings (three base64url segments joined by `.`).
+- E-mail addresses.
+- Query strings and fragments of URLs (`https://example.com/reset?[REDACTED]`) and credentials in URLs (`mysql://[REDACTED]@db/app`).
+
+Objects are kept by class name only (`[object App\Entity\Partner]`), never with their properties. If a pattern fails (the PCRE backtrack limit, say), the whole value is replaced with `[REDACTED]`: the scrubber fails closed.
 
 Override by implementing `Hexis\ErrorDigestBundle\Domain\PiiScrubber` and setting `error_digest.scrubber` to your service id.
 
