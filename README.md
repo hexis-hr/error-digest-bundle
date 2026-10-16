@@ -224,7 +224,7 @@ bin/console error-digest:list --since=1d --limit=20 > open-errors.json
 
 ### Handler registration
 
-The bundle auto-registers its Monolog handler at boot via `prependExtension`, so you don't edit `monolog.yaml` manually. The handler:
+The bundle auto-registers its Monolog handler at boot via `prependExtension`, so you don't edit `monolog.yaml` manually. The Monolog, Doctrine and migrations config the bundle adds goes in front of yours, so your own config wins: `monolog.handlers.error_digest.id` can point at a service of yours (one that decorates `ErrorDigestHandler`, say), and `doctrine.orm.mappings.ErrorDigest` or `doctrine_migrations.migrations_paths` can replace the bundle's directories. The handler:
 
 1. Filters by `minimum_level`, `channels`, `environments`, and `ignore` rules.
 2. Fingerprints the record via `Hexis\ErrorDigestBundle\Domain\Fingerprinter`.

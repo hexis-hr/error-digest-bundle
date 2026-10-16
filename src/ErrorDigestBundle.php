@@ -234,6 +234,12 @@ final class ErrorDigestBundle extends AbstractBundle
         }
     }
 
+    /**
+     * Doctrine, migrations and Monolog config goes in front of the host's: configs merge in
+     * order and the later value wins, so the host can override any of it (an error_digest
+     * handler with another id, another mapping or migrations dir). prependExtensionConfig()
+     * rather than extension(prepend: true), which Symfony 6.4 does not have.
+     */
     public function prependExtension(ContainerConfigurator $container, ContainerBuilder $builder): void
     {
         $bundlePath = \dirname(__DIR__);
@@ -256,11 +262,11 @@ final class ErrorDigestBundle extends AbstractBundle
                 ? ['mappings' => $mapping]
                 : ['entity_managers' => [$entityManager => ['mappings' => $mapping]]];
 
-            $container->extension('doctrine', ['orm' => $ormConfig]);
+            $builder->prependExtensionConfig('doctrine', ['orm' => $ormConfig]);
         }
 
         if ($builder->hasExtension('doctrine_migrations')) {
-            $container->extension('doctrine_migrations', [
+            $builder->prependExtensionConfig('doctrine_migrations', [
                 'migrations_paths' => [
                     'Hexis\\ErrorDigestBundle\\Migrations' => $bundlePath . '/src/Resources/migrations',
                 ],
@@ -268,7 +274,7 @@ final class ErrorDigestBundle extends AbstractBundle
         }
 
         if ($builder->hasExtension('monolog')) {
-            $container->extension('monolog', [
+            $builder->prependExtensionConfig('monolog', [
                 'handlers' => [
                     'error_digest' => [
                         'type' => 'service',
@@ -290,6 +296,8 @@ final class ErrorDigestBundle extends AbstractBundle
 
             $paths[$bundlePath . '/src/Resources/views'] = 'ErrorDigest';
 
+            // Appended on purpose: Twig searches a namespace's paths in config order, so paths
+            // the host adds to @ErrorDigest itself stay ahead of the bundle's views.
             $container->extension('twig', ['paths' => $paths]);
         }
     }
