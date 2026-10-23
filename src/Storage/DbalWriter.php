@@ -10,25 +10,34 @@ use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Platforms\SqlitePlatform;
 use Hexis\ErrorDigestBundle\Domain\PiiScrubber;
+use Hexis\ErrorDigestBundle\Domain\StorageScrubber;
 use Hexis\ErrorDigestBundle\Entity\ErrorFingerprint;
 
 /**
  * Direct DBAL writer. Uses its own connection so it doesn't entangle with the
  * host's EntityManager unit-of-work or transaction boundaries.
+ *
+ * Message, trace preview, request URI and context pass the PiiScrubber before
+ * they are stored; URLs lose their query string and fragment first.
  */
 final class DbalWriter implements Writer
 {
+    /** Request URLs that Monolog's WebProcessor adds to a record's extra. */
+    private const EXTRA_URLS = ['url', 'referrer'];
+
     private ?Connection $connection = null;
+    private readonly StorageScrubber $scrubber;
 
     /**
      * @param \Closure(): Connection $connectionFactory
      */
     public function __construct(
         private readonly \Closure $connectionFactory,
-        private readonly PiiScrubber $scrubber,
+        PiiScrubber $scrubber,
         private readonly string $fingerprintTable,
         private readonly string $occurrenceTable,
     ) {
+        $this->scrubber = new StorageScrubber($scrubber);
     }
 
     private function connection(): Connection
@@ -68,6 +77,7 @@ final class DbalWriter implements Writer
         $level = $record->level->value;
         $levelName = strtolower($record->level->getName());
         $message = $exception instanceof \Throwable ? $exception->getMessage() : $record->message;
+        $message = $this->scrubber->texts(['message' => $message])['message'];
         $exceptionClass = $exception instanceof \Throwable ? $exception::class : null;
         $file = $exception instanceof \Throwable ? $exception->getFile() : null;
         $line = $exception instanceof \Throwable ? $exception->getLine() : null;
@@ -76,27 +86,38 @@ final class DbalWriter implements Writer
         $firstSeenSql = $buffered->firstSeenAt->format('Y-m-d H:i:s');
         $lastSeenSql = $buffered->lastSeenAt->format('Y-m-d H:i:s');
 
+        // A new occurrence reopens a resolved fingerprint; a muted one stays muted and the
+        // assignee stays. resolved_at comes before status: MySQL assigns in order, and the
+        // CASE has to read the old status.
         if ($platform instanceof AbstractMySQLPlatform) {
             $sql = sprintf(
-                'INSERT INTO %s (fingerprint, level, level_name, message, exception_class, file, line, channel, environment, first_seen_at, last_seen_at, occurrence_count, status)
+                'INSERT INTO %1$s (fingerprint, level, level_name, message, exception_class, file, line, channel, environment, first_seen_at, last_seen_at, occurrence_count, status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE
+                    resolved_at = CASE WHEN status = \'%2$s\' THEN NULL ELSE resolved_at END,
+                    status = CASE WHEN status = \'%2$s\' THEN \'%3$s\' ELSE status END,
                     last_seen_at = CASE WHEN VALUES(last_seen_at) > last_seen_at THEN VALUES(last_seen_at) ELSE last_seen_at END,
                     occurrence_count = occurrence_count + VALUES(occurrence_count),
                     level_name = CASE WHEN VALUES(level) > level THEN VALUES(level_name) ELSE level_name END,
                     level = CASE WHEN VALUES(level) > level THEN VALUES(level) ELSE level END',
                 $this->fingerprintTable,
+                ErrorFingerprint::STATUS_RESOLVED,
+                ErrorFingerprint::STATUS_OPEN,
             );
         } elseif ($platform instanceof PostgreSQLPlatform || $platform instanceof SqlitePlatform) {
             $sql = sprintf(
                 'INSERT INTO %1$s (fingerprint, level, level_name, message, exception_class, file, line, channel, environment, first_seen_at, last_seen_at, occurrence_count, status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (fingerprint) DO UPDATE SET
+                    resolved_at = CASE WHEN %1$s.status = \'%2$s\' THEN NULL ELSE %1$s.resolved_at END,
+                    status = CASE WHEN %1$s.status = \'%2$s\' THEN \'%3$s\' ELSE %1$s.status END,
                     last_seen_at = CASE WHEN EXCLUDED.last_seen_at > %1$s.last_seen_at THEN EXCLUDED.last_seen_at ELSE %1$s.last_seen_at END,
                     occurrence_count = %1$s.occurrence_count + EXCLUDED.occurrence_count,
                     level_name = CASE WHEN EXCLUDED.level > %1$s.level THEN EXCLUDED.level_name ELSE %1$s.level_name END,
                     level = CASE WHEN EXCLUDED.level > %1$s.level THEN EXCLUDED.level ELSE %1$s.level END',
                 $this->fingerprintTable,
+                ErrorFingerprint::STATUS_RESOLVED,
+                ErrorFingerprint::STATUS_OPEN,
             );
         } else {
             throw new \RuntimeException('Unsupported database platform: ' . $platform::class);
@@ -150,19 +171,25 @@ final class DbalWriter implements Writer
         $context = $record->context;
         $exception = $context['exception'] ?? null;
         unset($context['exception']);
-        $context = $this->scrubber->scrub($context);
+        $context = $this->scrubber->context($context);
 
-        $extra = $this->scrubber->scrub($record->extra);
+        $extra = $record->extra;
+        foreach (self::EXTRA_URLS as $key) {
+            if (\is_string($extra[$key] ?? null)) {
+                $extra[$key] = StorageScrubber::withoutQuery($extra[$key]);
+            }
+        }
+        $extra = $this->scrubber->context($extra);
         if ($extra !== []) {
             $context['_extra'] = $extra;
         }
 
-        $tracePreview = null;
-        if ($exception instanceof \Throwable) {
-            $tracePreview = $this->formatTracePreview($exception);
-        }
-
-        $requestUri = \is_string($record->extra['url'] ?? null) ? $record->extra['url'] : null;
+        $text = $this->scrubber->texts([
+            'trace' => $exception instanceof \Throwable ? $this->formatTracePreview($exception) : null,
+            'uri' => StorageScrubber::withoutQuery(\is_string($record->extra['url'] ?? null) ? $record->extra['url'] : null),
+        ]);
+        $tracePreview = $text['trace'];
+        $requestUri = $text['uri'];
         $method = \is_string($record->extra['http_method'] ?? null) ? $record->extra['http_method'] : null;
 
         $this->connection()->executeStatement(

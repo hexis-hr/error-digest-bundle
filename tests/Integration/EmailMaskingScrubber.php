@@ -8,8 +8,9 @@ use Hexis\ErrorDigestBundle\Domain\DefaultPiiScrubber;
 use Hexis\ErrorDigestBundle\Domain\PiiScrubber;
 
 /**
- * The stricter scrubber {@see TestKernel} configures as error_digest.scrubber: the default
- * rules plus e-mail addresses.
+ * The scrubber {@see TestKernel} configures as error_digest.scrubber: e-mail addresses
+ * become [EMAIL] (before the default rules, which would mask them as [REDACTED]), then
+ * the default rules.
  */
 final class EmailMaskingScrubber implements PiiScrubber
 {
@@ -23,6 +24,6 @@ final class EmailMaskingScrubber implements PiiScrubber
             };
         };
 
-        return $mask((new DefaultPiiScrubber())->scrub($context));
+        return (new DefaultPiiScrubber())->scrub($mask($context));
     }
 }

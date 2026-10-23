@@ -86,9 +86,9 @@ final class ListCommand extends Command
     }
 
     /**
-     * Only fields that help triage. Free text goes through the PII scrubber again: the
-     * fingerprint message and trace are stored unscrubbed, and occurrence context,
-     * user reference and query strings are left out.
+     * Only fields that help triage. Free text goes through the PII scrubber again: rows
+     * stored before the writers scrubbed it, or under an older scrubber, are unscrubbed;
+     * occurrence context, user reference and query strings are left out.
      *
      * @param array{
      *   id: int, occurred_at: \DateTimeImmutable, context: array<string, mixed>,

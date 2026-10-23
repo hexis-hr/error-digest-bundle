@@ -12,7 +12,7 @@ Built for when logs are a haystack and real errors go under the radar.
 - **Deduplicates** by fingerprint (exception class + file + line + normalized message) so the same error fires once, no matter how many times it occurs.
 - **Rate-limits** within one process — 1000 occurrences of the same error in a second become a single occurrence row with accurate counters.
 - **Stores** in its own `err_fingerprint` + `err_occurrence` tables on whichever Doctrine connection you point it at.
-- **Scrubs** PII (passwords, tokens, bearer headers, JWTs, credit-card patterns) before writing.
+- **Scrubs** PII (passwords, tokens, bearer headers, JWTs, credit-card patterns, e-mail addresses, URL query strings) before writing.
 - **Digests** daily via Mailer + optional Slack/Teams via Notifier. Sections: new, spiking, top, stale.
 - **UI** at a configurable route prefix: list with filters, detail with occurrence timeline, resolve/mute/assign.
 
@@ -153,6 +153,15 @@ bin/console doctrine:migrations:migrate --no-interaction
 
 Two tables are created: `err_fingerprint` (lifetime state per error signature) and `err_occurrence` (rolling event log).
 
+### Upgrading from v0.3.x
+
+No PHP API changed (`PiiScrubber`, `Writer` and the service constructors are as they were), but these behaviour changes can break a host:
+
+- **The Doctrine mapping moved** from `src/Resources/config/doctrine` to `config/doctrine` at the package root, where `doctrine.orm.auto_mapping` finds it, so a host on the Symfony recipe's Doctrine config builds as is. Remove `mappings: { ErrorDigestBundle: false }` if you added it only to get the container to build (keep it on another entity manager that auto-maps, see [Multi-tenant](#multi-tenant--separate-connection-setups)), and point any config of yours that names the old directory at the new one.
+- **Your config wins over the bundle's.** The Monolog, Doctrine and migrations config the bundle adds is prepended, so where your config sets the same key, your value is used now. The `error_digest` Monolog handler now runs before the handlers of your config (it ran after them), so a handler of yours with `bubble: false` no longer hides records from it.
+- **What is stored is scrubbed**: the message, trace preview, request URI and context of server errors, and every text of browser errors, with URLs cut at their query string. `DefaultPiiScrubber` also masks e-mail addresses, URL query strings, fragments and credentials, and card-number integers, keeps objects by class name only, and fails closed. Rows stored before the upgrade are not rewritten.
+- **A resolved fingerprint that occurs again is open again** (a muted one stays muted).
+
 ---
 
 ## Trigger the digest
@@ -216,7 +225,7 @@ bin/console error-digest:list --since=1d --limit=20 > open-errors.json
 }
 ```
 
-`latest_occurrence` is the most recent occurrence row (`null` once pruned); `release` is set for browser errors. `message`, `trace_preview` and `request_uri` pass through the configured `PiiScrubber`, query strings and fragments are cut from `request_uri`, and occurrence context and user references are left out. The export is scrubbed, not anonymized: the default scrubber masks only the patterns listed under [PII scrubbing](#pii-scrubbing), so names, e-mail addresses and other personal data in free text are printed as stored. Review an export before sharing it, or configure a stricter `PiiScrubber`.
+`latest_occurrence` is the most recent occurrence row (`null` once pruned); `release` is set for browser errors. `message`, `trace_preview` and `request_uri` are stored scrubbed and pass through the configured `PiiScrubber` again (rows stored by older versions are not), query strings and fragments are cut from `request_uri`, and occurrence context and user references are left out. The export is scrubbed, not anonymized: the default scrubber masks only the patterns listed under [PII scrubbing](#pii-scrubbing), so names, phone numbers, postal addresses and other personal data in free text are printed as stored. Review an export before sharing it, or configure a stricter `PiiScrubber`.
 
 ---
 
@@ -224,7 +233,7 @@ bin/console error-digest:list --since=1d --limit=20 > open-errors.json
 
 ### Handler registration
 
-The bundle auto-registers its Monolog handler at boot via `prependExtension`, so you don't edit `monolog.yaml` manually. The handler:
+The bundle auto-registers its Monolog handler at boot via `prependExtension`, so you don't edit `monolog.yaml` manually. The Monolog, Doctrine and migrations config the bundle adds goes in front of yours, so your own config wins: `monolog.handlers.error_digest.id` can point at a service of yours (one that decorates `ErrorDigestHandler`, say), and `doctrine.orm.mappings.ErrorDigest` or `doctrine_migrations.migrations_paths` can replace the bundle's directories. The handler:
 
 1. Filters by `minimum_level`, `channels`, `environments`, and `ignore` rules.
 2. Fingerprints the record via `Hexis\ErrorDigestBundle\Domain\Fingerprinter`.
@@ -251,12 +260,18 @@ error_digest:
 
 ### PII scrubbing
 
-`DefaultPiiScrubber` runs over every occurrence's context before it hits the database. It redacts:
+Everything the bundle stores passes the configured scrubber first: the message, the trace preview, the request URI and the context of every occurrence (`_extra` included), and for browser errors the message, type, source and page URL, stack and user reference. URLs (the request URI, the referrer, the page and source URL of a browser error) lose their query string and fragment before that, and objects in the context are stored by class name only, whatever the scrubber returns. A text the scrubber drops or turns into a non-string is stored as `[REDACTED]`.
+
+`DefaultPiiScrubber`, the scrubber unless `error_digest.scrubber` names another, redacts:
 
 - Keys matching (case-insensitive, substring): `password`, `token`, `authorization`, `cookie`, `session`, `csrf`, `jwt`, `api_key`, `secret`, etc.
-- Credit-card-shaped number sequences anywhere in values.
+- Credit-card-shaped number sequences anywhere in values, and integers of 13 to 19 digits.
 - Bearer tokens (`Bearer xxx` → `Bearer [REDACTED]`).
 - JWT-shaped strings (three base64url segments joined by `.`).
+- E-mail addresses.
+- Query strings and fragments of absolute and relative URLs (`https://example.com/reset?[REDACTED]`, `/reset?[REDACTED]`) and credentials in URLs (`mysql://[REDACTED]@db/app`); an apostrophe does not end either.
+
+Objects are kept by class name only (`[object App\Entity\Partner]`), never with their properties. If a pattern fails (the PCRE backtrack limit, say), the whole value is replaced with `[REDACTED]`: the scrubber fails closed.
 
 Override by implementing `Hexis\ErrorDigestBundle\Domain\PiiScrubber` and setting `error_digest.scrubber` to your service id.
 
@@ -278,6 +293,8 @@ Once wired, the dashboard is at `{route_prefix}/` (default `/_errors/`). Require
 | Detail | `GET /_errors/fingerprint/{id}` | Inspect message, stack trace, occurrence timeline, scrubbed context per occurrence |
 | Status | `POST /_errors/fingerprint/{id}/status` | Mark resolved / muted / re-open |
 | Assign | `POST /_errors/fingerprint/{id}/assign` | Set an assignee (free-form string ref — email or user id) |
+
+A resolved fingerprint that occurs again (server or browser) is open again, with its assignee kept; a muted one stays muted.
 
 CSRF tokens are required on both POST endpoints and are baked into the templates via `csrf_token()`.
 
@@ -391,6 +408,8 @@ error_digest:
 
 - **`connection`** — which DBAL connection the handler and digest builder use for reads/writes. Defaults to `default`.
 - **`entity_manager`** (since v0.1.1) — which EntityManager gets the `ErrorDigest` mapping. Defaults to `null` which lands on the default EM. Set this to the EM that owns your non-default connection so `doctrine:schema:update --em=<name>` and `doctrine:migrations:migrate --em=<name>` operate on the right schema.
+
+If another EntityManager has `auto_mapping: true`, Doctrine maps the bundle there as well. Exclude it on that EM with `mappings: { ErrorDigestBundle: false }`.
 
 For a typical `default` (tenant) + `superadmin` (global) two-EM setup, point both settings at `superadmin`. Then run the bundle's migration against that EM once:
 

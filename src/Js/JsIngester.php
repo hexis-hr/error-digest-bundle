@@ -10,12 +10,16 @@ use Doctrine\DBAL\Platforms\AbstractMySQLPlatform;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
 use Doctrine\DBAL\Platforms\SqlitePlatform;
 use Hexis\ErrorDigestBundle\Domain\PiiScrubber;
+use Hexis\ErrorDigestBundle\Domain\StorageScrubber;
 use Hexis\ErrorDigestBundle\Entity\ErrorFingerprint;
 
 /**
  * Writes a browser-reported error into the same err_fingerprint / err_occurrence
  * tables as server-side captures. Channel is always "js" so the existing UI
  * filter lets admins view server vs browser errors separately.
+ *
+ * Every text the browser sends passes the PiiScrubber before it is stored; the
+ * page and source URLs lose their query string and fragment first.
  */
 final class JsIngester
 {
@@ -23,18 +27,22 @@ final class JsIngester
     private const LEVEL = 400;               // Monolog::ERROR
     private const LEVEL_NAME = 'error';
 
+    private readonly StorageScrubber $scrubber;
+
     public function __construct(
         private readonly Connection $connection,
         private readonly JsFingerprinter $fingerprinter,
-        private readonly PiiScrubber $scrubber,
+        PiiScrubber $scrubber,
         private readonly string $fingerprintTable,
         private readonly string $occurrenceTable,
     ) {
+        $this->scrubber = new StorageScrubber($scrubber);
     }
 
     public function ingest(JsEvent $event, string $environment): void
     {
         $fingerprint = $this->fingerprinter->fingerprint($event);
+        $event = $this->scrubbed($event);
 
         $this->connection->beginTransaction();
         try {
@@ -52,23 +60,35 @@ final class JsIngester
         $platform = $this->connection->getDatabasePlatform();
         $occurredAt = $event->occurredAt->format('Y-m-d H:i:s');
 
+        // A new occurrence reopens a resolved fingerprint; a muted one stays muted and the
+        // assignee stays. resolved_at comes before status: MySQL assigns in order, and the
+        // CASE has to read the old status.
         if ($platform instanceof AbstractMySQLPlatform) {
             $sql = sprintf(
-                'INSERT INTO %s (fingerprint, level, level_name, message, exception_class, file, line, channel, environment, first_seen_at, last_seen_at, occurrence_count, status)
+                'INSERT INTO %1$s (fingerprint, level, level_name, message, exception_class, file, line, channel, environment, first_seen_at, last_seen_at, occurrence_count, status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE
+                    resolved_at = CASE WHEN status = \'%2$s\' THEN NULL ELSE resolved_at END,
+                    status = CASE WHEN status = \'%2$s\' THEN \'%3$s\' ELSE status END,
                     last_seen_at = GREATEST(last_seen_at, VALUES(last_seen_at)),
                     occurrence_count = occurrence_count + 1',
                 $this->fingerprintTable,
+                ErrorFingerprint::STATUS_RESOLVED,
+                ErrorFingerprint::STATUS_OPEN,
             );
         } elseif ($platform instanceof PostgreSQLPlatform || $platform instanceof SqlitePlatform) {
+            // CASE rather than GREATEST(), which SQLite does not have.
             $sql = sprintf(
-                'INSERT INTO %s (fingerprint, level, level_name, message, exception_class, file, line, channel, environment, first_seen_at, last_seen_at, occurrence_count, status)
+                'INSERT INTO %1$s (fingerprint, level, level_name, message, exception_class, file, line, channel, environment, first_seen_at, last_seen_at, occurrence_count, status)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT (fingerprint) DO UPDATE SET
-                    last_seen_at = GREATEST(%1$s.last_seen_at, EXCLUDED.last_seen_at),
+                    resolved_at = CASE WHEN %1$s.status = \'%2$s\' THEN NULL ELSE %1$s.resolved_at END,
+                    status = CASE WHEN %1$s.status = \'%2$s\' THEN \'%3$s\' ELSE %1$s.status END,
+                    last_seen_at = CASE WHEN EXCLUDED.last_seen_at > %1$s.last_seen_at THEN EXCLUDED.last_seen_at ELSE %1$s.last_seen_at END,
                     occurrence_count = %1$s.occurrence_count + 1',
                 $this->fingerprintTable,
+                ErrorFingerprint::STATUS_RESOLVED,
+                ErrorFingerprint::STATUS_OPEN,
             );
         } else {
             throw new \RuntimeException('Unsupported database platform: ' . $platform::class);
@@ -117,9 +137,35 @@ final class JsIngester
         return (int) $id;
     }
 
+    private function scrubbed(JsEvent $event): JsEvent
+    {
+        $text = $this->scrubber->texts([
+            'message' => $event->message,
+            'exception_type' => $event->exceptionType,
+            'source_url' => StorageScrubber::withoutQuery($event->sourceUrl),
+            'stack' => $event->stack,
+            'page_url' => StorageScrubber::withoutQuery($event->pageUrl),
+            'user_ref' => $event->userRef,
+        ]);
+
+        return new JsEvent(
+            message: (string) $text['message'],
+            exceptionType: $text['exception_type'],
+            sourceUrl: $text['source_url'],
+            line: $event->line,
+            column: $event->column,
+            stack: $text['stack'],
+            pageUrl: $text['page_url'],
+            userAgent: $event->userAgent,
+            release: $event->release,
+            userRef: $text['user_ref'],
+            occurredAt: $event->occurredAt,
+        );
+    }
+
     private function insertOccurrence(int $fingerprintId, JsEvent $event): void
     {
-        $context = $this->scrubber->scrub(array_filter([
+        $context = $this->scrubber->context(array_filter([
             'source_url' => $event->sourceUrl,
             'line' => $event->line,
             'column' => $event->column,
