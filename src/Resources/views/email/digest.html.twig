@@ -55,6 +55,15 @@
     {% endif %}
 {% endif %}
 
+{% if payload.sections.reopened is defined %}
+    <h2>Reopened ({{ payload.sections.reopened|length }})</h2>
+    {% if payload.sections.reopened is empty %}
+        <p class="empty">No resolved fingerprints came back.</p>
+    {% else %}
+        {{ _self.fingerprintTable(payload.sections.reopened, 'window') }}
+    {% endif %}
+{% endif %}
+
 {% if payload.sections.spiking is defined %}
     <h2>Spiking ({{ payload.sections.spiking|length }})</h2>
     {% if payload.sections.spiking is empty %}

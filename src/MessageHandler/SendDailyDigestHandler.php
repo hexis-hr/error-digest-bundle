@@ -33,6 +33,7 @@ final class SendDailyDigestHandler
         if ($message->dryRun) {
             $this->logger->info('ErrorDigest dry-run — payload built but not sent', [
                 'new' => \count($payload->sections['new'] ?? []),
+                'reopened' => \count($payload->sections['reopened'] ?? []),
                 'spiking' => \count($payload->sections['spiking'] ?? []),
                 'top' => \count($payload->sections['top'] ?? []),
                 'stale' => \count($payload->sections['stale'] ?? []),

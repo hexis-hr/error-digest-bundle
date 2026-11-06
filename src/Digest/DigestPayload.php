@@ -11,7 +11,7 @@ namespace Hexis\ErrorDigestBundle\Digest;
 final readonly class DigestPayload
 {
     /**
-     * @param array<string, list<FingerprintSummary>> $sections Keyed by section name (new, spiking, top, stale).
+     * @param array<string, list<FingerprintSummary>> $sections Keyed by section name (new, reopened, spiking, top, stale).
      * @param array<string, int>                       $levelCounts Aggregate occurrence counts by level_name for the window.
      */
     public function __construct(

@@ -45,6 +45,9 @@ final class DigestBuilder
         if (\in_array('new', $sectionNames, true)) {
             $sections['new'] = $this->queryNew($windowStart, $windowEnd);
         }
+        if (\in_array('reopened', $sectionNames, true)) {
+            $sections['reopened'] = $this->queryReopened($windowStart, $windowEnd);
+        }
         if (\in_array('spiking', $sectionNames, true)) {
             $sections['spiking'] = $this->querySpiking($windowStart, $windowEnd);
         }
@@ -105,6 +108,39 @@ final class DigestBuilder
             $windowEnd->format('Y-m-d H:i:s'),
             $windowStart->format('Y-m-d H:i:s'),
             $windowEnd->format('Y-m-d H:i:s'),
+            ErrorFingerprint::STATUS_OPEN,
+        ]);
+    }
+
+    /**
+     * The upserts clear notified_in_digest_at when they reopen a fingerprint and a sent digest
+     * stamps it again, so each reopening is listed once, even after a failed send. A fingerprint
+     * first seen inside the window is in "new" instead.
+     *
+     * shortcut: an open fingerprint no digest ever listed (digest down for longer than the window)
+     * lands here too, add a reopened_at column if that label has to be exact.
+     *
+     * @return list<FingerprintSummary>
+     */
+    private function queryReopened(\DateTimeImmutable $windowStart, \DateTimeImmutable $windowEnd): array
+    {
+        $sql = sprintf(
+            'SELECT f.*, (
+                 SELECT COUNT(*) FROM %s o WHERE o.fingerprint_id = f.id AND o.occurred_at BETWEEN ? AND ?
+             ) AS window_occurrences
+             FROM %s f
+             WHERE f.first_seen_at < ?
+               AND f.notified_in_digest_at IS NULL
+               AND f.status = ?
+             ORDER BY f.last_seen_at DESC',
+            $this->occurrenceTable,
+            $this->fingerprintTable,
+        );
+
+        return $this->fetchSummaries($sql, [
+            $windowStart->format('Y-m-d H:i:s'),
+            $windowEnd->format('Y-m-d H:i:s'),
+            $windowStart->format('Y-m-d H:i:s'),
             ErrorFingerprint::STATUS_OPEN,
         ]);
     }

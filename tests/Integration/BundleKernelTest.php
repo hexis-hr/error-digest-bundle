@@ -134,6 +134,39 @@ final class BundleKernelTest extends KernelTestCase
         self::assertNotNull($connection->fetchOne('SELECT notified_in_digest_at FROM err_fingerprint'));
     }
 
+    public function testTheDigestMailAnnouncesAResolvedErrorThatCameBackOnce(): void
+    {
+        $this->runConsoleCommand(['command' => 'error-digest:fingerprint-test', '--message' => 'SFTP fetch failed']);
+        $this->runConsoleCommand(['command' => 'error-digest:send-digest']);
+
+        /** @var Connection $connection */
+        $connection = self::getContainer()->get('doctrine.dbal.default_connection');
+        $connection->executeStatement("UPDATE err_fingerprint SET status = 'resolved', resolved_at = first_seen_at, first_seen_at = '2026-01-01 00:00:00'");
+
+        $this->runConsoleCommand(['command' => 'error-digest:fingerprint-test', '--message' => 'SFTP fetch failed']);
+        self::assertSame('open', $connection->fetchOne('SELECT status FROM err_fingerprint'));
+
+        $this->runConsoleCommand(['command' => 'error-digest:send-digest']);
+        $this->runConsoleCommand(['command' => 'error-digest:send-digest']);
+
+        /** @var MessageLoggerListener $mailLog */
+        $mailLog = self::getContainer()->get('mailer.message_logger_listener');
+        $emails = array_values(array_filter(
+            $mailLog->getEvents()->getMessages(),
+            static fn (object $message): bool => $message instanceof Email,
+        ));
+
+        self::assertCount(3, $emails);
+        [, $reopened, $next] = $emails;
+
+        self::assertStringContainsString('0 new, 1 reopened', (string) $reopened->getSubject());
+        self::assertMatchesRegularExpression('/=== REOPENED \(1\) ===\s+\[ERROR\] \w+  · app\s+SFTP fetch failed/', (string) $reopened->getTextBody());
+        self::assertStringContainsString('<h2>Reopened (1)</h2>', (string) $reopened->getHtmlBody());
+
+        self::assertStringContainsString('0 reopened', (string) $next->getSubject());
+        self::assertStringContainsString('=== REOPENED (0) ===', (string) $next->getTextBody());
+    }
+
     public function testAdminPagesRenderForTheConfiguredRole(): void
     {
         $this->runConsoleCommand(['command' => 'error-digest:fingerprint-test', '--message' => 'Partner 4711 could not be saved']);

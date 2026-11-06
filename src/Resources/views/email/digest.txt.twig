@@ -21,6 +21,15 @@ No fingerprints to report for this window. Quiet is good.
 {% else %}  (none)
 {% endfor %}
 {% endif %}
+{% if payload.sections.reopened is defined -%}
+=== REOPENED ({{ payload.sections.reopened|length }}) ===
+{% for row in payload.sections.reopened %}
+  [{{ row.levelName|upper }}] {{ row.shortFingerprint() }}  · {{ row.channel }}
+    {{ row.message|slice(0, 200) }}
+    window: {{ row.windowOccurrences }}  · last seen: {{ row.lastSeenAt|date('Y-m-d H:i') }}
+{% else %}  (none)
+{% endfor %}
+{% endif %}
 {% if payload.sections.spiking is defined -%}
 === SPIKING ({{ payload.sections.spiking|length }}) ===
 {% for row in payload.sections.spiking %}

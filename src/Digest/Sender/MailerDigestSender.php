@@ -34,9 +34,10 @@ final class MailerDigestSender implements DigestSender
 
         $email = (new TemplatedEmail())
             ->subject(sprintf(
-                '[%s] Error digest — %d new, %d spiking, %s',
+                '[%s] Error digest — %d new, %d reopened, %d spiking, %s',
                 $payload->environment,
                 \count($payload->sections['new'] ?? []),
+                \count($payload->sections['reopened'] ?? []),
                 \count($payload->sections['spiking'] ?? []),
                 $this->summarizeLevels($payload->levelCounts),
             ))

@@ -123,7 +123,7 @@ error_digest:
         from: 'noreply@%env(APP_DOMAIN)%'
         senders: [mailer]               # + 'notifier' to enable chat pings
         window: '24 hours'
-        sections: [new, spiking, top, stale]
+        sections: [new, reopened, spiking, top, stale]
         top_limit: 10
         stale_days: 7
         spike_multiplier: 3.0           # window vs prior window ratio to count as "spiking"
@@ -160,7 +160,7 @@ No PHP API changed (`PiiScrubber`, `Writer` and the service constructors are as 
 - **The Doctrine mapping moved** from `src/Resources/config/doctrine` to `config/doctrine` at the package root, where `doctrine.orm.auto_mapping` finds it, so a host on the Symfony recipe's Doctrine config builds as is. Remove `mappings: { ErrorDigestBundle: false }` if you added it only to get the container to build (keep it on another entity manager that auto-maps, see [Multi-tenant](#multi-tenant--separate-connection-setups)), and point any config of yours that names the old directory at the new one.
 - **Your config wins over the bundle's.** The Monolog, Doctrine and migrations config the bundle adds is prepended, so where your config sets the same key, your value is used now. The `error_digest` Monolog handler now runs before the handlers of your config (it ran after them), so a handler of yours with `bubble: false` no longer hides records from it.
 - **What is stored is scrubbed**: the message, trace preview, request URI and context of server errors, and every text of browser errors, with URLs cut at their query string. `DefaultPiiScrubber` also masks e-mail addresses, URL query strings, fragments and credentials, and card-number integers, keeps objects by class name only, and fails closed. Rows stored before the upgrade are not rewritten.
-- **A resolved fingerprint that occurs again is open again** (a muted one stays muted).
+- **A resolved fingerprint that occurs again is open again** (a muted one stays muted), and the digest announces it once in a new `reopened` section. If you set `digest.sections` yourself, add `reopened` to the list, or the digest will not call it out. The first digest after the upgrade can also list older open fingerprints no digest ever included.
 
 ---
 
@@ -307,6 +307,7 @@ The templates use Bootstrap 5 via CDN by default. Override with your own by plac
 | Section | Definition |
 |---|---|
 | **new** | Fingerprints first seen within `digest.window` AND with `notified_in_digest_at IS NULL`. Strongest signal for "something just broke." |
+| **reopened** | Status=open, first seen before `digest.window`, `notified_in_digest_at IS NULL`: a resolved fingerprint that occurred again and no digest has announced yet. Listed once. |
 | **spiking** | Window occurrence count > `spike_multiplier` × max(1, prior-window occurrence count). |
 | **top** | Open fingerprints with the most occurrences in the window. Limited by `digest.top_limit`. |
 | **stale** | Status=open, first seen more than `stale_days` ago. Reminders that unresolved issues are still alive. |

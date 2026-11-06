@@ -73,13 +73,14 @@ final class DbalWriterTest extends TestCase
     public function testARecurringResolvedFingerprintIsOpenAgainAndKeepsItsAssignee(): void
     {
         $this->emit('abc', Level::Error, 1);
-        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'resolved', resolved_at = '2026-10-01 08:00:00', assignee_id = 'ivan'");
+        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'resolved', resolved_at = '2026-10-01 08:00:00', notified_in_digest_at = '2026-10-01 07:00:00', assignee_id = 'ivan'");
 
         $this->emit('abc', Level::Error, 1);
 
         $row = $this->connection->fetchAssociative('SELECT * FROM err_fingerprint');
         self::assertSame('open', $row['status']);
         self::assertNull($row['resolved_at']);
+        self::assertNull($row['notified_in_digest_at'], 'The next digest has to announce it.');
         self::assertSame('ivan', $row['assignee_id']);
         self::assertSame(2, (int) $row['occurrence_count']);
     }
@@ -87,13 +88,28 @@ final class DbalWriterTest extends TestCase
     public function testARecurringMutedFingerprintStaysMuted(): void
     {
         $this->emit('abc', Level::Error, 1);
-        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'muted', assignee_id = 'ivan'");
+        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'muted', notified_in_digest_at = '2026-10-01 07:00:00', assignee_id = 'ivan'");
 
         $this->emit('abc', Level::Error, 1);
 
         $row = $this->connection->fetchAssociative('SELECT * FROM err_fingerprint');
         self::assertSame('muted', $row['status']);
+        self::assertSame('2026-10-01 07:00:00', $row['notified_in_digest_at']);
         self::assertSame('ivan', $row['assignee_id']);
+        self::assertSame(2, (int) $row['occurrence_count']);
+    }
+
+    public function testARecurringOpenFingerprintStaysOpenAndIsNotAnnouncedAgain(): void
+    {
+        $this->emit('abc', Level::Error, 1);
+        $this->connection->executeStatement("UPDATE err_fingerprint SET notified_in_digest_at = '2026-10-01 07:00:00'");
+
+        $this->emit('abc', Level::Error, 1);
+
+        $row = $this->connection->fetchAssociative('SELECT * FROM err_fingerprint');
+        self::assertSame('open', $row['status']);
+        self::assertNull($row['resolved_at']);
+        self::assertSame('2026-10-01 07:00:00', $row['notified_in_digest_at']);
         self::assertSame(2, (int) $row['occurrence_count']);
     }
 
