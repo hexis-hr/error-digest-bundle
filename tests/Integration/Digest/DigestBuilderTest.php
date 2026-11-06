@@ -7,7 +7,12 @@ namespace Hexis\ErrorDigestBundle\Tests\Integration\Digest;
 use Doctrine\DBAL\Connection;
 use Hexis\ErrorDigestBundle\Digest\DigestBuilder;
 use Hexis\ErrorDigestBundle\Digest\DigestPayload;
+use Hexis\ErrorDigestBundle\Domain\DefaultPiiScrubber;
+use Hexis\ErrorDigestBundle\Storage\BufferedRecord;
+use Hexis\ErrorDigestBundle\Storage\DbalWriter;
 use Hexis\ErrorDigestBundle\Tests\Integration\SchemaFactory;
+use Monolog\Level;
+use Monolog\LogRecord;
 use PHPUnit\Framework\TestCase;
 
 final class DigestBuilderTest extends TestCase
@@ -119,6 +124,61 @@ final class DigestBuilderTest extends TestCase
         self::assertSame('old-open', $payload->sections['stale'][0]->fingerprint);
     }
 
+    public function testReopenedSectionListsOldOpenFingerprintsNoDigestHasAnnounced(): void
+    {
+        $now = new \DateTimeImmutable('2026-04-21 12:00:00');
+
+        $reopenedId = $this->seedFingerprint('reopened', $now->modify('-10 days'), $now->modify('-1 hour'));
+        $this->seedOccurrence($reopenedId, $now->modify('-1 hour'));
+        $this->seedFingerprint('announced', $now->modify('-10 days'), $now->modify('-1 hour'), notifiedInDigestAt: $now->modify('-2 hours'));
+        $this->seedFingerprint('first-seen-in-window', $now->modify('-1 hour'), $now->modify('-1 hour'));
+        $this->seedFingerprint('resolved', $now->modify('-10 days'), $now->modify('-3 days'), status: 'resolved');
+        $this->seedFingerprint('muted', $now->modify('-10 days'), $now->modify('-1 hour'), status: 'muted');
+
+        $payload = $this->build($now);
+
+        self::assertSame(['reopened'], array_map(static fn ($row) => $row->fingerprint, $payload->sections['reopened']));
+        self::assertSame(1, $payload->sections['reopened'][0]->windowOccurrences);
+        self::assertSame(['first-seen-in-window'], array_map(static fn ($row) => $row->fingerprint, $payload->sections['new']));
+    }
+
+    public function testAResolvedFingerprintThatOccursAgainIsAnnouncedOnce(): void
+    {
+        $writer = new DbalWriter(
+            connectionFactory: fn () => $this->connection,
+            scrubber: new DefaultPiiScrubber(),
+            fingerprintTable: SchemaFactory::FINGERPRINT_TABLE,
+            occurrenceTable: SchemaFactory::OCCURRENCE_TABLE,
+        );
+        $builder = $this->makeBuilder();
+        $occur = static function (\DateTimeImmutable $at) use ($writer): void {
+            $record = new LogRecord($at, 'app', Level::Error, 'boom');
+            $buffered = new BufferedRecord($record);
+            $buffered->addOccurrence($record, rateLimitSeconds: 0);
+            $writer->flush(['abc' => $buffered], 'test');
+        };
+
+        $day1 = new \DateTimeImmutable('2026-04-21 08:00:00');
+        $occur($day1->modify('-1 hour'));
+        $first = $builder->build($day1);
+        $builder->markNotified($first);
+        self::assertSame([], $first->sections['reopened'], 'A new fingerprint is new, not reopened.');
+        self::assertCount(1, $first->sections['new']);
+
+        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'resolved', resolved_at = '2026-04-21 09:00:00'");
+
+        $day4 = $day1->modify('+3 days');
+        self::assertSame([], $builder->build($day4)->sections['reopened'], 'Still resolved, nothing to announce.');
+
+        $occur($day4->modify('-1 hour'));
+        $second = $builder->build($day4);
+        $builder->markNotified($second);
+        self::assertCount(1, $second->sections['reopened']);
+        self::assertSame([], $second->sections['new']);
+
+        self::assertSame([], $builder->build($day4->modify('+1 day'))->sections['reopened'], 'Announced once.');
+    }
+
     public function testMarkNotifiedStampsAllFingerprintsInPayload(): void
     {
         $now = new \DateTimeImmutable('2026-04-21 12:00:00');
@@ -147,7 +207,7 @@ final class DigestBuilderTest extends TestCase
             'from' => null,
             'senders' => ['mailer'],
             'window' => '24 hours',
-            'sections' => ['new', 'spiking', 'top', 'stale'],
+            'sections' => ['new', 'reopened', 'spiking', 'top', 'stale'],
             'top_limit' => 10,
             'stale_days' => 7,
             'spike_multiplier' => 3.0,

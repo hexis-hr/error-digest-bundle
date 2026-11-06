@@ -53,6 +53,7 @@ final class NotifierDigestSender implements DigestSender
     private function formatMessage(DigestPayload $payload): string
     {
         $newCount = \count($payload->sections['new'] ?? []);
+        $reopenedCount = \count($payload->sections['reopened'] ?? []);
         $spikingCount = \count($payload->sections['spiking'] ?? []);
         $staleCount = \count($payload->sections['stale'] ?? []);
         $levelSummary = $this->formatLevelCounts($payload->levelCounts);
@@ -63,10 +64,10 @@ final class NotifierDigestSender implements DigestSender
                 $payload->windowStart->format('Y-m-d H:i'),
                 $payload->windowEnd->format('Y-m-d H:i'),
             ),
-            sprintf('%d new · %d spiking · %d stale · %s', $newCount, $spikingCount, $staleCount, $levelSummary),
+            sprintf('%d new · %d reopened · %d spiking · %d stale · %s', $newCount, $reopenedCount, $spikingCount, $staleCount, $levelSummary),
         ];
 
-        foreach (['new', 'spiking'] as $section) {
+        foreach (['new', 'reopened', 'spiking'] as $section) {
             $rows = $payload->sections[$section] ?? [];
             if ($rows === []) {
                 continue;

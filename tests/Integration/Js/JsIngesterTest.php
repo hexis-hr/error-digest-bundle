@@ -46,26 +46,40 @@ final class JsIngesterTest extends TestCase
     public function testARecurringResolvedFingerprintIsOpenAgainAndKeepsItsAssignee(): void
     {
         $this->ingester->ingest($this->event(new \DateTimeImmutable()), 'prod');
-        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'resolved', resolved_at = '2026-10-01 08:00:00', assignee_id = 'ivan'");
+        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'resolved', resolved_at = '2026-10-01 08:00:00', notified_in_digest_at = '2026-10-01 07:00:00', assignee_id = 'ivan'");
 
         $this->ingester->ingest($this->event(new \DateTimeImmutable()), 'prod');
 
         $row = $this->connection->fetchAssociative('SELECT * FROM err_fingerprint');
         self::assertSame('open', $row['status']);
         self::assertNull($row['resolved_at']);
+        self::assertNull($row['notified_in_digest_at'], 'The next digest has to announce it.');
         self::assertSame('ivan', $row['assignee_id']);
     }
 
     public function testARecurringMutedFingerprintStaysMuted(): void
     {
         $this->ingester->ingest($this->event(new \DateTimeImmutable()), 'prod');
-        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'muted', assignee_id = 'ivan'");
+        $this->connection->executeStatement("UPDATE err_fingerprint SET status = 'muted', notified_in_digest_at = '2026-10-01 07:00:00', assignee_id = 'ivan'");
 
         $this->ingester->ingest($this->event(new \DateTimeImmutable()), 'prod');
 
         $row = $this->connection->fetchAssociative('SELECT * FROM err_fingerprint');
         self::assertSame('muted', $row['status']);
+        self::assertSame('2026-10-01 07:00:00', $row['notified_in_digest_at']);
         self::assertSame('ivan', $row['assignee_id']);
+    }
+
+    public function testARecurringOpenFingerprintStaysOpenAndIsNotAnnouncedAgain(): void
+    {
+        $this->ingester->ingest($this->event(new \DateTimeImmutable()), 'prod');
+        $this->connection->executeStatement("UPDATE err_fingerprint SET notified_in_digest_at = '2026-10-01 07:00:00'");
+
+        $this->ingester->ingest($this->event(new \DateTimeImmutable()), 'prod');
+
+        $row = $this->connection->fetchAssociative('SELECT * FROM err_fingerprint');
+        self::assertSame('open', $row['status']);
+        self::assertSame('2026-10-01 07:00:00', $row['notified_in_digest_at']);
     }
 
     public function testScrubsWhatTheBrowserSendsBeforeStorage(): void
